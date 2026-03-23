@@ -1126,7 +1126,7 @@ def _model_flow_custom(config):
     current_url = get_env_value("OPENAI_BASE_URL") or ""
     current_key = get_env_value("OPENAI_API_KEY") or ""
 
-    print("Custom OpenAI-compatible endpoint configuration:")
+    print("Custom endpoint configuration:")
     if current_url:
         print(f"  Current URL: {current_url}")
     if current_key:
@@ -1134,7 +1134,7 @@ def _model_flow_custom(config):
     print()
 
     try:
-        base_url = input(f"API base URL [{current_url or 'e.g. https://api.example.com/v1'}]: ").strip()
+        base_url = input(f"API base URL [{current_url or 'e.g. https://api.example.com or /v1'}]: ").strip()
         api_key = input(f"API key [{current_key[:8] + '...' if current_key else 'optional'}]: ").strip()
         model_name = input("Model name (e.g. gpt-4, llama-3-70b): ").strip()
         context_length_str = input("Context length in tokens [leave blank for auto-detect]: ").strip()
@@ -1165,16 +1165,27 @@ def _model_flow_custom(config):
     effective_key = api_key or current_key
 
     from hermes_cli.models import probe_api_models
+    from api_mode import detect_custom_api_mode
 
     probe = probe_api_models(effective_key, effective_url)
     if probe.get("used_fallback") and probe.get("resolved_base_url"):
-        print(
-            f"Warning: endpoint verification worked at {probe['resolved_base_url']}/models, "
-            f"not the exact URL you entered. Saving the working base URL instead."
-        )
-        effective_url = probe["resolved_base_url"]
-        if base_url:
-            base_url = effective_url
+        resolved_base_url = str(probe["resolved_base_url"]).rstrip("/")
+        entered_mode = detect_custom_api_mode(effective_url)
+        resolved_mode = detect_custom_api_mode(resolved_base_url)
+        if resolved_mode and entered_mode and resolved_mode != entered_mode:
+            print(
+                f"Warning: endpoint verification worked at {resolved_base_url}/models, "
+                "but that path implies a different API mode than the URL you entered. "
+                "Keeping your original base URL."
+            )
+        else:
+            print(
+                f"Warning: endpoint verification worked at {resolved_base_url}/models, "
+                f"not the exact URL you entered. Saving the working base URL instead."
+            )
+            effective_url = resolved_base_url
+            if base_url:
+                base_url = effective_url
     elif probe.get("models") is not None:
         print(
             f"Verified endpoint via {probe.get('probed_url')} "
@@ -1204,6 +1215,7 @@ def _model_flow_custom(config):
             cfg["model"] = model
         model["provider"] = "custom"
         model["base_url"] = effective_url
+        model["api_mode"] = detect_custom_api_mode(effective_url) or "chat_completions"
         save_config(cfg)
         deactivate_provider()
 
@@ -1214,10 +1226,16 @@ def _model_flow_custom(config):
         print("Endpoint saved. Use `/model` in chat or `hermes model` to set a model.")
 
     # Auto-save to custom_providers so it appears in the menu next time
-    _save_custom_provider(effective_url, effective_key, model_name or "", context_length=context_length)
+    _save_custom_provider(
+        effective_url,
+        effective_key,
+        model_name or "",
+        context_length=context_length,
+        api_mode=detect_custom_api_mode(effective_url),
+    )
 
 
-def _save_custom_provider(base_url, api_key="", model="", context_length=None):
+def _save_custom_provider(base_url, api_key="", model="", context_length=None, api_mode=None):
     """Save a custom endpoint to custom_providers in config.yaml.
 
     Deduplicates by base_url — if the URL already exists, updates the
@@ -1237,6 +1255,9 @@ def _save_custom_provider(base_url, api_key="", model="", context_length=None):
             changed = False
             if model and entry.get("model") != model:
                 entry["model"] = model
+                changed = True
+            if api_mode and entry.get("api_mode") != api_mode:
+                entry["api_mode"] = api_mode
                 changed = True
             if model and context_length:
                 models_cfg = entry.get("models", {})
@@ -1268,6 +1289,8 @@ def _save_custom_provider(base_url, api_key="", model="", context_length=None):
     entry = {"name": name, "base_url": base_url}
     if api_key:
         entry["api_key"] = api_key
+    if api_mode:
+        entry["api_mode"] = api_mode
     if model:
         entry["model"] = model
     if model and context_length:
@@ -1343,11 +1366,13 @@ def _model_flow_named_custom(config, provider_info):
     from hermes_cli.auth import _save_model_choice, deactivate_provider
     from hermes_cli.config import save_env_value, load_config, save_config
     from hermes_cli.models import fetch_api_models
+    from api_mode import detect_custom_api_mode
 
     name = provider_info["name"]
     base_url = provider_info["base_url"]
     api_key = provider_info.get("api_key", "")
     saved_model = provider_info.get("model", "")
+    api_mode = provider_info.get("api_mode") or detect_custom_api_mode(base_url)
 
     # If a model is saved, just activate immediately — no probing needed
     if saved_model:
@@ -1363,6 +1388,8 @@ def _model_flow_named_custom(config, provider_info):
             cfg["model"] = model
         model["provider"] = "custom"
         model["base_url"] = base_url
+        if api_mode:
+            model["api_mode"] = api_mode
         save_config(cfg)
         deactivate_provider()
 
@@ -1437,11 +1464,13 @@ def _model_flow_named_custom(config, provider_info):
         cfg["model"] = model
     model["provider"] = "custom"
     model["base_url"] = base_url
+    if api_mode:
+        model["api_mode"] = api_mode
     save_config(cfg)
     deactivate_provider()
 
     # Save model name to the custom_providers entry for next time
-    _save_custom_provider(base_url, api_key, model_name)
+    _save_custom_provider(base_url, api_key, model_name, api_mode=api_mode)
 
     print(f"\n✅ Model set to: {model_name}")
     print(f"   Provider: {name} ({base_url})")

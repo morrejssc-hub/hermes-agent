@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from typing import Any, Dict, Optional
 
+from api_mode import detect_custom_api_mode
 from hermes_cli import auth as auth_mod
 from hermes_cli.auth import (
     AuthError,
@@ -28,13 +29,10 @@ def _normalize_custom_provider_name(value: str) -> str:
 def _detect_api_mode_for_url(base_url: str) -> Optional[str]:
     """Auto-detect api_mode from the resolved base URL.
 
-    Direct api.openai.com endpoints need the Responses API for GPT-5.x
-    tool calls with reasoning (chat/completions returns 400).
+    This is only used for custom endpoints and env/config-driven custom base
+    URLs. Built-in providers still apply their own explicit routing rules.
     """
-    normalized = (base_url or "").strip().lower().rstrip("/")
-    if "api.openai.com" in normalized and "openrouter" not in normalized:
-        return "codex_responses"
-    return None
+    return detect_custom_api_mode(base_url)
 
 
 def _auto_detect_local_model(base_url: str) -> str:

@@ -47,6 +47,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from openai import OpenAI
 
+from api_mode import RESPONSES_API_MODE, detect_custom_api_mode
 from hermes_cli.config import get_hermes_home
 from hermes_constants import OPENROUTER_BASE_URL
 
@@ -608,7 +609,7 @@ def _read_main_model() -> str:
     return ""
 
 
-def _resolve_custom_runtime() -> Tuple[Optional[str], Optional[str]]:
+def _resolve_custom_runtime_details() -> Tuple[Optional[str], Optional[str], Optional[str]]:
     """Resolve the active custom/main endpoint the same way the main CLI does.
 
     This covers both env-driven OPENAI_BASE_URL setups and config-saved custom
@@ -621,22 +622,31 @@ def _resolve_custom_runtime() -> Tuple[Optional[str], Optional[str]]:
         runtime = resolve_runtime_provider(requested="custom")
     except Exception as exc:
         logger.debug("Auxiliary client: custom runtime resolution failed: %s", exc)
-        return None, None
+        return None, None, None
 
     custom_base = runtime.get("base_url")
     custom_key = runtime.get("api_key")
+    custom_mode = runtime.get("api_mode")
     if not isinstance(custom_base, str) or not custom_base.strip():
-        return None, None
+        return None, None, None
     if not isinstance(custom_key, str) or not custom_key.strip():
-        return None, None
+        return None, None, None
 
     custom_base = custom_base.strip().rstrip("/")
     if "openrouter.ai" in custom_base.lower():
         # requested='custom' falls back to OpenRouter when no custom endpoint is
         # configured. Treat that as "no custom endpoint" for auxiliary routing.
-        return None, None
+        return None, None, None
 
-    return custom_base, custom_key.strip()
+    if not isinstance(custom_mode, str) or not custom_mode.strip():
+        custom_mode = detect_custom_api_mode(custom_base)
+
+    return custom_base, custom_key.strip(), custom_mode
+
+
+def _resolve_custom_runtime() -> Tuple[Optional[str], Optional[str]]:
+    custom_base, custom_key, _ = _resolve_custom_runtime_details()
+    return custom_base, custom_key
 
 
 def _current_custom_base_url() -> str:
@@ -644,13 +654,31 @@ def _current_custom_base_url() -> str:
     return custom_base or ""
 
 
-def _try_custom_endpoint() -> Tuple[Optional[OpenAI], Optional[str]]:
-    custom_base, custom_key = _resolve_custom_runtime()
+def _build_custom_auxiliary_client(
+    *,
+    base_url: str,
+    api_key: str,
+    model: str,
+    api_mode: Optional[str] = None,
+) -> Any:
+    real_client = OpenAI(api_key=api_key, base_url=base_url)
+    if api_mode == RESPONSES_API_MODE:
+        return CodexAuxiliaryClient(real_client, model)
+    return real_client
+
+
+def _try_custom_endpoint() -> Tuple[Optional[Any], Optional[str]]:
+    custom_base, custom_key, custom_mode = _resolve_custom_runtime_details()
     if not custom_base or not custom_key:
         return None, None
     model = _read_main_model() or "gpt-4o-mini"
     logger.debug("Auxiliary client: custom endpoint (%s)", model)
-    return OpenAI(api_key=custom_key, base_url=custom_base), model
+    return _build_custom_auxiliary_client(
+        base_url=custom_base,
+        api_key=custom_key,
+        model=model,
+        api_mode=custom_mode,
+    ), model
 
 
 def _try_codex() -> Tuple[Optional[Any], Optional[str]]:
@@ -899,7 +927,12 @@ def resolve_provider_client(
                 )
                 return None, None
             final_model = model or _read_main_model() or "gpt-4o-mini"
-            client = OpenAI(api_key=custom_key, base_url=custom_base)
+            client = _build_custom_auxiliary_client(
+                base_url=custom_base,
+                api_key=custom_key,
+                model=final_model,
+                api_mode=detect_custom_api_mode(custom_base),
+            )
             return (_to_async_client(client, final_model) if async_mode
                     else (client, final_model))
         # Try custom first, then codex, then API-key providers

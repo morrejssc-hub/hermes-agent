@@ -431,7 +431,7 @@ def test_named_custom_provider_api_mode(monkeypatch):
 
 
 def test_named_custom_provider_without_api_mode_defaults(monkeypatch):
-    """custom_providers entries without api_mode should default to chat_completions."""
+    """custom_providers entries without api_mode infer mode from the base URL."""
     monkeypatch.setattr(rp, "resolve_provider", lambda *a, **k: "my-server")
     monkeypatch.setattr(
         rp, "_get_named_custom_provider",
@@ -445,6 +445,24 @@ def test_named_custom_provider_without_api_mode_defaults(monkeypatch):
     resolved = rp.resolve_runtime_provider(requested="my-server")
 
     assert resolved["api_mode"] == "chat_completions"
+
+
+def test_named_custom_provider_without_v1_defaults_to_responses(monkeypatch):
+    """Response-style custom roots should default to codex_responses."""
+    monkeypatch.setattr(rp, "resolve_provider", lambda *a, **k: "my-server")
+    monkeypatch.setattr(
+        rp, "_get_named_custom_provider",
+        lambda p: {
+            "name": "my-server",
+            "base_url": "http://localhost:8000",
+            "api_key": "***",
+        },
+    )
+
+    resolved = rp.resolve_runtime_provider(requested="my-server")
+
+    assert resolved["api_mode"] == "codex_responses"
+    assert resolved["base_url"] == "http://localhost:8000"
 
 
 def test_anthropic_messages_in_valid_api_modes():

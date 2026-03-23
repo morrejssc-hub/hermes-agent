@@ -433,7 +433,7 @@ def test_cmd_model_falls_back_to_auto_on_invalid_provider(monkeypatch, capsys):
     assert "No change." in output
 
 
-def test_model_flow_custom_saves_verified_v1_base_url(monkeypatch, capsys):
+def test_model_flow_custom_keeps_responses_root_when_probe_falls_back_to_v1(monkeypatch, capsys):
     monkeypatch.setattr(
         "hermes_cli.config.get_env_value",
         lambda key: "" if key in {"OPENAI_BASE_URL", "OPENAI_API_KEY"} else "",
@@ -465,7 +465,7 @@ def test_model_flow_custom_saves_verified_v1_base_url(monkeypatch, capsys):
     hermes_main._model_flow_custom({})
     output = capsys.readouterr().out
 
-    assert "Saving the working base URL instead" in output
-    assert saved_env["OPENAI_BASE_URL"] == "http://localhost:8000/v1"
+    assert "Keeping your original base URL" in output
+    assert saved_env["OPENAI_BASE_URL"] == "http://localhost:8000"
     assert saved_env["OPENAI_API_KEY"] == "local-key"
     assert saved_env["MODEL"] == "llm"

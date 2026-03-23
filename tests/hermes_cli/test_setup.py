@@ -123,6 +123,7 @@ def test_custom_setup_clears_active_oauth_provider(tmp_path, monkeypatch):
     if isinstance(reloaded.get("model"), dict):
         assert reloaded["model"].get("provider") == "custom"
         assert reloaded["model"].get("default") == "custom/model"
+        assert reloaded["model"].get("api_mode") == "chat_completions"
 
 
 def test_codex_setup_uses_runtime_access_token_for_live_model_list(tmp_path, monkeypatch):

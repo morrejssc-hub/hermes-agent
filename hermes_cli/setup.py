@@ -1043,8 +1043,8 @@ def setup_model_provider(config: dict):
     elif provider_idx == 3:  # Custom endpoint
         selected_provider = "custom"
         print()
-        print_header("Custom OpenAI-Compatible Endpoint")
-        print_info("Works with any API that follows OpenAI's chat completions spec")
+        print_header("Custom Endpoint")
+        print_info("Auto-detects OpenAI chat, OpenAI Responses, and Anthropic-compatible base URLs")
         print()
 
         # Reuse the shared custom endpoint flow from `hermes model`.

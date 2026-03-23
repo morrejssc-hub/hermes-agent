@@ -45,6 +45,15 @@ import fire
 from datetime import datetime
 from pathlib import Path
 
+from api_mode import (
+    ANTHROPIC_MESSAGES_API_MODE,
+    CHAT_COMPLETIONS_API_MODE,
+    RESPONSES_API_MODE,
+    detect_custom_api_mode,
+    is_anthropic_compatible_base_url,
+    is_direct_openai_url,
+)
+
 # Load .env from ~/.hermes/.env first, then project root as dev fallback.
 # User-managed env files should override stale shell exports on restart.
 from hermes_cli.env_loader import load_hermes_dotenv
@@ -494,29 +503,36 @@ class AIAgent:
         self.provider = provider_name or "openrouter"
         self.acp_command = acp_command or command
         self.acp_args = list(acp_args or args or [])
-        if api_mode in {"chat_completions", "codex_responses", "anthropic_messages"}:
+        if api_mode in {CHAT_COMPLETIONS_API_MODE, RESPONSES_API_MODE, ANTHROPIC_MESSAGES_API_MODE}:
             self.api_mode = api_mode
         elif self.provider == "openai-codex":
-            self.api_mode = "codex_responses"
+            self.api_mode = RESPONSES_API_MODE
         elif (provider_name is None) and "chatgpt.com/backend-api/codex" in self._base_url_lower:
-            self.api_mode = "codex_responses"
+            self.api_mode = RESPONSES_API_MODE
             self.provider = "openai-codex"
-        elif self.provider == "anthropic" or (provider_name is None and "api.anthropic.com" in self._base_url_lower):
-            self.api_mode = "anthropic_messages"
+        elif self.provider == "anthropic":
+            self.api_mode = ANTHROPIC_MESSAGES_API_MODE
             self.provider = "anthropic"
-        elif self._base_url_lower.rstrip("/").endswith("/anthropic"):
+        elif is_anthropic_compatible_base_url(self.base_url):
             # Third-party Anthropic-compatible endpoints (e.g. MiniMax, DashScope)
-            # use a URL convention ending in /anthropic. Auto-detect these so the
-            # Anthropic Messages API adapter is used instead of chat completions.
-            self.api_mode = "anthropic_messages"
+            # use Anthropic's Messages API instead of chat completions.
+            self.api_mode = ANTHROPIC_MESSAGES_API_MODE
+            if provider_name is None and "api.anthropic.com" in self._base_url_lower:
+                self.provider = "anthropic"
+        elif provider_name is None or self.provider == "custom":
+            # Custom endpoint heuristic:
+            #   /v1        -> OpenAI-compatible chat completions
+            #   /anthropic -> Anthropic Messages API
+            #   bare root  -> OpenAI Responses API
+            self.api_mode = detect_custom_api_mode(self.base_url) or CHAT_COMPLETIONS_API_MODE
         else:
-            self.api_mode = "chat_completions"
+            self.api_mode = CHAT_COMPLETIONS_API_MODE
 
         # Direct OpenAI sessions use the Responses API path.  GPT-5.x tool
         # calls with reasoning are rejected on /v1/chat/completions, and
         # Hermes is a tool-using client by default.
-        if self.api_mode == "chat_completions" and self._is_direct_openai_url():
-            self.api_mode = "codex_responses"
+        if self.api_mode == CHAT_COMPLETIONS_API_MODE and self._is_direct_openai_url():
+            self.api_mode = RESPONSES_API_MODE
 
         # Pre-warm OpenRouter model metadata cache in a background thread.
         # fetch_model_metadata() is cached for 1 hour; this avoids a blocking
@@ -1164,8 +1180,7 @@ class AIAgent:
 
     def _is_direct_openai_url(self, base_url: str = None) -> bool:
         """Return True when a base URL targets OpenAI's native API."""
-        url = (base_url or self._base_url_lower).lower()
-        return "api.openai.com" in url and "openrouter" not in url
+        return is_direct_openai_url(base_url or self.base_url)
 
     def _max_tokens_param(self, value: int) -> dict:
         """Return the correct max tokens kwarg for the current provider.
@@ -3803,11 +3818,11 @@ class AIAgent:
             fb_api_mode = "chat_completions"
             fb_base_url = str(fb_client.base_url)
             if fb_provider == "openai-codex":
-                fb_api_mode = "codex_responses"
-            elif fb_provider == "anthropic" or fb_base_url.rstrip("/").lower().endswith("/anthropic"):
-                fb_api_mode = "anthropic_messages"
+                fb_api_mode = RESPONSES_API_MODE
+            elif fb_provider == "anthropic" or is_anthropic_compatible_base_url(fb_base_url):
+                fb_api_mode = ANTHROPIC_MESSAGES_API_MODE
             elif self._is_direct_openai_url(fb_base_url):
-                fb_api_mode = "codex_responses"
+                fb_api_mode = RESPONSES_API_MODE
 
             old_model = self.model
             self.model = fb_model

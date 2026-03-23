@@ -237,6 +237,36 @@ def test_api_mode_respects_explicit_openrouter_provider_over_codex_url(monkeypat
     assert agent.provider == "openrouter"
 
 
+def test_api_mode_uses_responses_for_custom_root_without_v1(monkeypatch):
+    _patch_agent_bootstrap(monkeypatch)
+    agent = run_agent.AIAgent(
+        model="gpt-5",
+        provider="custom",
+        base_url="https://proxy.example.com",
+        api_key="test-token",
+        quiet_mode=True,
+        max_iterations=1,
+        skip_context_files=True,
+        skip_memory=True,
+    )
+    assert agent.api_mode == "codex_responses"
+
+
+def test_api_mode_uses_chat_for_custom_v1_root(monkeypatch):
+    _patch_agent_bootstrap(monkeypatch)
+    agent = run_agent.AIAgent(
+        model="gpt-4.1",
+        provider="custom",
+        base_url="https://proxy.example.com/v1",
+        api_key="test-token",
+        quiet_mode=True,
+        max_iterations=1,
+        skip_context_files=True,
+        skip_memory=True,
+    )
+    assert agent.api_mode == "chat_completions"
+
+
 def test_build_api_kwargs_codex(monkeypatch):
     agent = _build_agent(monkeypatch)
     kwargs = agent._build_api_kwargs(

@@ -480,6 +480,22 @@ class TestGetTextAuxiliaryClient:
         call_kwargs = mock_openai.call_args
         assert call_kwargs.kwargs["base_url"] == "http://localhost:1234/v1"
 
+    def test_custom_responses_root_uses_codex_auxiliary_adapter(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_BASE_URL", "http://localhost:1234")
+        monkeypatch.setenv("OPENAI_API_KEY", "lm-studio-key")
+        monkeypatch.setenv("OPENAI_MODEL", "my-local-model")
+
+        with patch("agent.auxiliary_client._read_nous_auth", return_value=None), \
+             patch("agent.auxiliary_client.OpenAI") as mock_openai:
+            mock_openai.return_value = MagicMock()
+            client, model = get_text_auxiliary_client()
+
+        from agent.auxiliary_client import CodexAuxiliaryClient
+
+        assert isinstance(client, CodexAuxiliaryClient)
+        assert model == "my-local-model"
+        assert mock_openai.call_args.kwargs["base_url"] == "http://localhost:1234"
+
     def test_task_direct_endpoint_override(self, monkeypatch):
         monkeypatch.setenv("OPENROUTER_API_KEY", "or-key")
         monkeypatch.setenv("AUXILIARY_WEB_EXTRACT_BASE_URL", "http://localhost:2345/v1")

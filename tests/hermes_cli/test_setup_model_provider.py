@@ -130,7 +130,7 @@ def test_setup_custom_endpoint_saves_working_v1_base_url(tmp_path, monkeypatch):
     env = _read_env(tmp_path)
 
     # _model_flow_custom saves env vars and config to disk
-    assert env.get("OPENAI_BASE_URL") == "http://localhost:8000/v1"
+    assert env.get("OPENAI_BASE_URL") == "http://localhost:8000"
     assert env.get("OPENAI_API_KEY") == "local-key"
 
     # The model config is saved as a dict by _model_flow_custom
@@ -139,6 +139,8 @@ def test_setup_custom_endpoint_saves_working_v1_base_url(tmp_path, monkeypatch):
     if isinstance(model_cfg, dict):
         assert model_cfg.get("provider") == "custom"
         assert model_cfg.get("default") == "llm"
+        assert model_cfg.get("base_url") == "http://localhost:8000"
+        assert model_cfg.get("api_mode") == "codex_responses"
 
 
 def test_setup_keep_current_config_provider_uses_provider_specific_model_menu(tmp_path, monkeypatch):
