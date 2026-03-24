@@ -2573,6 +2573,7 @@ class GatewayRunner:
         """Handle /model command - show or change the current model."""
         import yaml
         from hermes_cli.models import (
+            normalize_provider_model_name,
             parse_model_input,
             validate_requested_model,
             curated_models_for_provider,
@@ -2655,6 +2656,7 @@ class GatewayRunner:
 
         # Parse provider:model syntax
         target_provider, new_model = parse_model_input(args, current_provider)
+        new_model = normalize_provider_model_name(target_provider, new_model)
 
         # Detect custom/local provider — skip auto-detection to prevent
         # silently accepting an OpenRouter model name on a localhost endpoint.

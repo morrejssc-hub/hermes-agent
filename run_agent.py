@@ -501,6 +501,11 @@ class AIAgent:
         self.base_url = base_url or OPENROUTER_BASE_URL
         provider_name = provider.strip().lower() if isinstance(provider, str) and provider.strip() else None
         self.provider = provider_name or "openrouter"
+        try:
+            from hermes_cli.models import normalize_provider_model_name
+            self.model = normalize_provider_model_name(self.provider, self.model)
+        except Exception:
+            pass
         self.acp_command = acp_command or command
         self.acp_args = list(acp_args or args or [])
         if api_mode in {CHAT_COMPLETIONS_API_MODE, RESPONSES_API_MODE, ANTHROPIC_MESSAGES_API_MODE}:
@@ -2028,8 +2033,10 @@ class AIAgent:
     # ── Honcho integration helpers ──
 
     def _honcho_should_activate(self, hcfg) -> bool:
-        """Return True when remote Honcho should be active."""
-        if not hcfg or not hcfg.enabled or not hcfg.api_key:
+        """Return True when Honcho is enabled and has a connection target."""
+        if not hcfg or not hcfg.enabled:
+            return False
+        if not hcfg.api_key and not getattr(hcfg, "base_url", None):
             return False
         return True
 

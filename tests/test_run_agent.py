@@ -1666,6 +1666,16 @@ class TestSystemPromptStability:
 
         assert "User prefers Python over JavaScript" in agent._cached_system_prompt
 
+    def test_honcho_activation_accepts_local_base_url_without_api_key(self, agent):
+        cfg = HonchoClientConfig(enabled=True, api_key=None, base_url="http://localhost:8010")
+
+        assert agent._honcho_should_activate(cfg) is True
+
+    def test_honcho_activation_rejects_missing_api_key_and_base_url(self, agent):
+        cfg = HonchoClientConfig(enabled=True, api_key=None, base_url=None)
+
+        assert agent._honcho_should_activate(cfg) is False
+
     def test_honcho_prefetch_runs_on_continuing_session(self):
         """Honcho prefetch is consumed on continuing sessions via ephemeral context."""
         conversation_history = [

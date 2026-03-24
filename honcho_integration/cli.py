@@ -256,6 +256,7 @@ def cmd_status(args) -> None:
     print(f"\nHoncho status\n" + "─" * 40)
     print(f"  Enabled:        {hcfg.enabled}")
     print(f"  API key:        {masked}")
+    print(f"  Base URL:       {hcfg.base_url or 'default'}")
     print(f"  Workspace:      {hcfg.workspace_id}")
     print(f"  Host:           {hcfg.host}")
     print(f"  Config path:    {active_path}")
@@ -270,7 +271,7 @@ def cmd_status(args) -> None:
             print(f"    {peer}: {mode}")
     print(f"  Write freq:     {hcfg.write_frequency}")
 
-    if hcfg.enabled and hcfg.api_key:
+    if hcfg.enabled and (hcfg.api_key or hcfg.base_url):
         print("\n  Connection... ", end="", flush=True)
         try:
             get_honcho_client(hcfg)
@@ -278,7 +279,7 @@ def cmd_status(args) -> None:
         except Exception as e:
             print(f"FAILED ({e})\n")
     else:
-        reason = "disabled" if not hcfg.enabled else "no API key"
+        reason = "disabled" if not hcfg.enabled else "no API key or base URL"
         print(f"\n  Not connected ({reason})\n")
 
 

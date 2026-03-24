@@ -798,6 +798,7 @@ def cmd_model(args):
         "ai-gateway": "AI Gateway",
         "kilocode": "Kilo Code",
         "alibaba": "Alibaba Cloud (DashScope)",
+        "cpa": "CPA",
         "custom": "Custom endpoint",
     }
     active_label = provider_labels.get(active, active)
@@ -824,6 +825,7 @@ def cmd_model(args):
         ("opencode-go", "OpenCode Go (open models, $10/month subscription)"),
         ("ai-gateway", "AI Gateway (Vercel — 200+ models, pay-per-use)"),
         ("alibaba", "Alibaba Cloud / DashScope (Qwen models, Anthropic-compatible)"),
+        ("cpa", "CPA (OpenAI-compatible router / local proxy)"),
     ]
 
     # Add user-defined custom providers from config.yaml
@@ -896,7 +898,7 @@ def cmd_model(args):
         _model_flow_anthropic(config, current_model)
     elif selected_provider == "kimi-coding":
         _model_flow_kimi(config, current_model)
-    elif selected_provider in ("zai", "minimax", "minimax-cn", "kilocode", "opencode-zen", "opencode-go", "ai-gateway", "alibaba"):
+    elif selected_provider in ("zai", "minimax", "minimax-cn", "kilocode", "opencode-zen", "opencode-go", "ai-gateway", "alibaba", "cpa"):
         _model_flow_api_key_provider(config, selected_provider, current_model)
 
 
@@ -2012,7 +2014,7 @@ def _model_flow_kimi(config, current_model=""):
 
 
 def _model_flow_api_key_provider(config, provider_id, current_model=""):
-    """Generic flow for API-key providers (z.ai, MiniMax)."""
+    """Generic flow for API-key providers."""
     from hermes_cli.auth import (
         PROVIDER_REGISTRY, _prompt_model_selection, _save_model_choice,
         _update_config_for_provider, deactivate_provider,
@@ -2022,6 +2024,7 @@ def _model_flow_api_key_provider(config, provider_id, current_model=""):
     pconfig = PROVIDER_REGISTRY[provider_id]
     key_env = pconfig.api_key_env_vars[0] if pconfig.api_key_env_vars else ""
     base_url_env = pconfig.base_url_env_var or ""
+    key_optional = provider_id == "cpa"
 
     # Check / prompt for API key
     existing_key = ""
@@ -2031,19 +2034,25 @@ def _model_flow_api_key_provider(config, provider_id, current_model=""):
             break
 
     if not existing_key:
-        print(f"No {pconfig.name} API key configured.")
+        if key_optional:
+            print(f"{pconfig.name} API key is optional.")
+        else:
+            print(f"No {pconfig.name} API key configured.")
         if key_env:
             try:
-                new_key = input(f"{key_env} (or Enter to cancel): ").strip()
+                prompt_label = f"{key_env} (optional)" if key_optional else f"{key_env} (or Enter to cancel)"
+                new_key = input(f"{prompt_label}: ").strip()
             except (KeyboardInterrupt, EOFError):
                 print()
                 return
             if not new_key:
-                print("Cancelled.")
-                return
-            save_env_value(key_env, new_key)
-            print("API key saved.")
-            print()
+                if not key_optional:
+                    print("Cancelled.")
+                    return
+            else:
+                save_env_value(key_env, new_key)
+                print("API key saved.")
+                print()
     else:
         print(f"  {pconfig.name} API key: {existing_key[:8]}... ✓")
         print()
@@ -3143,7 +3152,7 @@ For more help on a command:
     )
     chat_parser.add_argument(
         "--provider",
-        choices=["auto", "openrouter", "nous", "openai-codex", "copilot-acp", "copilot", "anthropic", "zai", "kimi-coding", "minimax", "minimax-cn", "kilocode"],
+        choices=["auto", "openrouter", "nous", "openai-codex", "copilot-acp", "copilot", "anthropic", "zai", "kimi-coding", "minimax", "minimax-cn", "kilocode", "cpa"],
         default=None,
         help="Inference provider (default: auto)"
     )

@@ -580,6 +580,20 @@ def test_alibaba_openai_compatible_v1_endpoint_stays_chat_completions(monkeypatc
     assert resolved["base_url"] == "https://coding-intl.dashscope.aliyuncs.com/v1"
 
 
+def test_cpa_local_v1_endpoint_uses_chat_completions_and_placeholder_key(monkeypatch):
+    monkeypatch.setattr(rp, "resolve_provider", lambda *a, **k: "cpa")
+    monkeypatch.setattr(rp, "_get_model_config", lambda: {})
+    monkeypatch.delenv("CPA_API_KEY", raising=False)
+    monkeypatch.setenv("CPA_BASE_URL", "http://127.0.0.1:8317/v1")
+
+    resolved = rp.resolve_runtime_provider(requested="cpa")
+
+    assert resolved["provider"] == "cpa"
+    assert resolved["api_mode"] == "chat_completions"
+    assert resolved["base_url"] == "http://127.0.0.1:8317/v1"
+    assert resolved["api_key"] == "no-key-required"
+
+
 def test_named_custom_provider_anthropic_api_mode(monkeypatch):
     """Custom providers should accept api_mode: anthropic_messages."""
     monkeypatch.setattr(rp, "resolve_provider", lambda *a, **k: "my-anthropic-proxy")

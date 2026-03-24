@@ -385,14 +385,17 @@ def resolve_runtime_provider(
         creds = resolve_api_key_provider_credentials(provider)
         model_cfg = _get_model_config()
         base_url = creds.get("base_url", "").rstrip("/")
+        api_key = creds.get("api_key", "")
         api_mode = "chat_completions"
         if provider == "copilot":
-            api_mode = _copilot_runtime_api_mode(model_cfg, creds.get("api_key", ""))
+            api_mode = _copilot_runtime_api_mode(model_cfg, api_key)
         else:
             # Check explicit api_mode from model config first
             configured_mode = _parse_api_mode(model_cfg.get("api_mode"))
             if configured_mode:
                 api_mode = configured_mode
+            elif provider == "cpa":
+                api_mode = _detect_api_mode_for_url(base_url) or "chat_completions"
             # Auto-detect Anthropic-compatible endpoints by URL convention
             # (e.g. https://api.minimax.io/anthropic, https://dashscope.../anthropic)
             elif base_url.rstrip("/").endswith("/anthropic"):
@@ -403,11 +406,18 @@ def resolve_runtime_provider(
                 api_mode = "anthropic_messages"
                 if base_url.rstrip("/").endswith("/v1"):
                     base_url = base_url.rstrip("/")[:-3] + "/anthropic"
+        if provider == "cpa" and not api_key:
+            try:
+                from agent.model_metadata import is_local_endpoint
+            except Exception:
+                is_local_endpoint = None
+            if callable(is_local_endpoint) and is_local_endpoint(base_url):
+                api_key = "no-key-required"
         return {
             "provider": provider,
             "api_mode": api_mode,
             "base_url": base_url,
-            "api_key": creds.get("api_key", ""),
+            "api_key": api_key,
             "source": creds.get("source", "env"),
             "requested_provider": requested_provider,
         }

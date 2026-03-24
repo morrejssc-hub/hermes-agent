@@ -3566,6 +3566,7 @@ class HermesCLI:
             if len(parts) > 1:
                 from hermes_cli.auth import resolve_provider
                 from hermes_cli.models import (
+                    normalize_provider_model_name,
                     parse_model_input,
                     validate_requested_model,
                     _PROVIDER_LABELS,
@@ -3576,6 +3577,7 @@ class HermesCLI:
                 # Parse provider:model syntax (e.g. "openrouter:anthropic/claude-sonnet-4.5")
                 current_provider = self.provider or self.requested_provider or "openrouter"
                 target_provider, new_model = parse_model_input(raw_input, current_provider)
+                new_model = normalize_provider_model_name(target_provider, new_model)
                 # Auto-detect provider when no explicit provider:model syntax was used.
                 # Skip auto-detection for custom providers — the model name might
                 # coincidentally match a known provider's catalog, but the user

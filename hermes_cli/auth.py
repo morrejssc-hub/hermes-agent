@@ -164,6 +164,14 @@ PROVIDER_REGISTRY: Dict[str, ProviderConfig] = {
         api_key_env_vars=("DASHSCOPE_API_KEY",),
         base_url_env_var="DASHSCOPE_BASE_URL",
     ),
+    "cpa": ProviderConfig(
+        id="cpa",
+        name="CPA",
+        auth_type="api_key",
+        inference_base_url="http://127.0.0.1:8317/v1",
+        api_key_env_vars=("CPA_API_KEY",),
+        base_url_env_var="CPA_BASE_URL",
+    ),
     "minimax-cn": ProviderConfig(
         id="minimax-cn",
         name="MiniMax (China)",
@@ -687,6 +695,7 @@ def resolve_provider(
         "opencode": "opencode-zen", "zen": "opencode-zen",
         "go": "opencode-go", "opencode-go-sub": "opencode-go",
         "kilo": "kilocode", "kilo-code": "kilocode", "kilo-gateway": "kilocode",
+        "cli-proxy-api": "cpa", "proxy-api": "cpa",
     }
     normalized = _PROVIDER_ALIASES.get(normalized, normalized)
 

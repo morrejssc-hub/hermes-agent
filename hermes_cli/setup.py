@@ -80,6 +80,7 @@ _DEFAULT_PROVIDER_MODELS = {
     "minimax-cn": ["MiniMax-M2.7", "MiniMax-M2.7-highspeed", "MiniMax-M2.5", "MiniMax-M2.5-highspeed", "MiniMax-M2.1"],
     "ai-gateway": ["anthropic/claude-opus-4.6", "anthropic/claude-sonnet-4.6", "openai/gpt-5", "google/gemini-3-flash"],
     "kilocode": ["anthropic/claude-opus-4.6", "anthropic/claude-sonnet-4.6", "openai/gpt-5.4", "google/gemini-3-pro-preview", "google/gemini-3-flash-preview"],
+    "cpa": [],
 }
 
 
@@ -889,6 +890,7 @@ def setup_model_provider(config: dict):
         "OpenCode Go (open models, $10/month subscription)",
         "GitHub Copilot (uses GITHUB_TOKEN or gh auth token)",
         "GitHub Copilot ACP (spawns `copilot --acp --stdio`)",
+        "CPA (OpenAI-compatible router / local proxy)",
     ]
     if keep_label:
         provider_choices.append(keep_label)
@@ -1531,6 +1533,34 @@ def setup_model_provider(config: dict):
             save_env_value("OPENAI_BASE_URL", "")
             save_env_value("OPENAI_API_KEY", "")
         _set_model_provider(config, "copilot-acp", pconfig.inference_base_url)
+
+    elif provider_idx == 16:  # CPA
+        selected_provider = "cpa"
+        print()
+        print_header("CPA")
+        pconfig = PROVIDER_REGISTRY["cpa"]
+        print_info("OpenAI-compatible router / local proxy.")
+        print_info("API key is optional for local deployments.")
+        print()
+
+        existing_key = get_env_value("CPA_API_KEY")
+        if existing_key:
+            print_info(f"Current API key: {existing_key[:8]}... (configured)")
+            if prompt_yes_no("Update API key?", False):
+                api_key = prompt("  CPA API key (optional)", password=True)
+                save_env_value("CPA_API_KEY", api_key)
+                print_success("CPA API key updated")
+        else:
+            api_key = prompt("  CPA API key (optional)", password=True)
+            if api_key:
+                save_env_value("CPA_API_KEY", api_key)
+                print_success("CPA API key saved")
+
+        current_base = get_env_value("CPA_BASE_URL") or pconfig.inference_base_url
+        base_url = prompt("  CPA base URL", default=current_base).strip() or current_base
+        save_env_value("CPA_BASE_URL", base_url)
+        selected_base_url = base_url.rstrip("/")
+        _set_model_provider(config, "cpa", selected_base_url)
         selected_base_url = pconfig.inference_base_url
 
     # else: provider_idx == 16 (Keep current) — only shown when a provider already exists
@@ -1714,7 +1744,7 @@ def setup_model_provider(config: dict):
             model_cfg = _model_config_dict(config)
             model_cfg["api_mode"] = "chat_completions"
             config["model"] = model_cfg
-        elif selected_provider in ("copilot", "zai", "kimi-coding", "minimax", "minimax-cn", "kilocode", "ai-gateway", "opencode-zen", "opencode-go", "alibaba"):
+        elif selected_provider in ("copilot", "zai", "kimi-coding", "minimax", "minimax-cn", "kilocode", "ai-gateway", "opencode-zen", "opencode-go", "alibaba", "cpa"):
             _setup_provider_model_selection(
                 config, selected_provider, current_model,
                 prompt_choice, prompt,
@@ -1775,7 +1805,7 @@ def setup_model_provider(config: dict):
     # Write provider+base_url to config.yaml only after model selection is complete.
     # This prevents a race condition where the gateway picks up a new provider
     # before the model name has been updated to match.
-    if selected_provider in ("copilot-acp", "copilot", "zai", "kimi-coding", "minimax", "minimax-cn", "kilocode", "anthropic") and selected_base_url is not None:
+    if selected_provider in ("copilot-acp", "copilot", "zai", "kimi-coding", "minimax", "minimax-cn", "kilocode", "anthropic", "cpa") and selected_base_url is not None:
         _update_config_for_provider(selected_provider, selected_base_url)
 
     save_config(config)

@@ -126,6 +126,7 @@ _PROVIDER_MODELS: dict[str, list[str]] = {
         "deepseek-chat",
         "deepseek-reasoner",
     ],
+    "cpa": [],
     "opencode-zen": [
         "gpt-5.4-pro",
         "gpt-5.4",
@@ -213,6 +214,7 @@ _PROVIDER_LABELS = {
     "minimax-cn": "MiniMax (China)",
     "anthropic": "Anthropic",
     "deepseek": "DeepSeek",
+    "cpa": "CPA",
     "opencode-zen": "OpenCode Zen",
     "opencode-go": "OpenCode Go",
     "ai-gateway": "AI Gateway",
@@ -239,6 +241,8 @@ _PROVIDER_ALIASES = {
     "claude": "anthropic",
     "claude-code": "anthropic",
     "deep-seek": "deepseek",
+    "cli-proxy-api": "cpa",
+    "proxy-api": "cpa",
     "opencode": "opencode-zen",
     "zen": "opencode-zen",
     "go": "opencode-go",
@@ -287,6 +291,7 @@ def list_available_providers() -> list[dict[str, str]]:
     _PROVIDER_ORDER = [
         "openrouter", "nous", "openai-codex", "copilot", "copilot-acp",
         "zai", "kimi-coding", "minimax", "minimax-cn", "kilocode", "anthropic", "alibaba",
+        "cpa",
         "opencode-zen", "opencode-go",
         "ai-gateway", "deepseek", "custom",
     ]
@@ -340,13 +345,25 @@ def parse_model_input(raw: str, current_provider: str) -> tuple[str, str]:
     provider from the input or *current_provider* if none was specified.
     """
     stripped = raw.strip()
+    if stripped.lower().startswith("cpa/") and len(stripped) > 4:
+        return ("cpa", stripped[4:].strip())
     colon = stripped.find(":")
     if colon > 0:
         provider_part = stripped[:colon].strip().lower()
         model_part = stripped[colon + 1:].strip()
         if provider_part and model_part and provider_part in _KNOWN_PROVIDER_NAMES:
             return (normalize_provider(provider_part), model_part)
+
     return (current_provider, stripped)
+
+
+def normalize_provider_model_name(provider: Optional[str], model_name: Optional[str]) -> str:
+    """Normalize provider-specific model-name quirks."""
+    provider_norm = normalize_provider(provider)
+    model = str(model_name or "").strip()
+    if provider_norm == "cpa" and model.lower().startswith("cpa/"):
+        return model[4:].strip()
+    return model
 
 
 def _get_custom_base_url() -> str:
@@ -577,6 +594,16 @@ def provider_model_ids(provider: Optional[str]) -> list[str]:
         live = _fetch_ai_gateway_models()
         if live:
             return live
+    if normalized == "cpa":
+        try:
+            from hermes_cli.auth import resolve_api_key_provider_credentials
+
+            creds = resolve_api_key_provider_credentials("cpa")
+            live = fetch_api_models(creds.get("api_key") or None, creds.get("base_url"))
+            if live:
+                return live
+        except Exception:
+            pass
     if normalized == "custom":
         base_url = _get_custom_base_url()
         if base_url:
@@ -1063,7 +1090,7 @@ def validate_requested_model(
       - recognized: whether it matched a known provider catalog
       - message: optional warning / guidance for the user
     """
-    requested = (model_name or "").strip()
+    requested = normalize_provider_model_name(provider, model_name)
     normalized = normalize_provider(provider)
     if normalized == "openrouter" and base_url and "openrouter.ai" not in base_url:
         normalized = "custom"

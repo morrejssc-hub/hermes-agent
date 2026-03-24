@@ -525,6 +525,22 @@ OPTIONAL_ENV_VARS = {
         "category": "provider",
         "advanced": True,
     },
+    "CPA_API_KEY": {
+        "description": "CPA API key for your OpenAI-compatible CPA router (optional for local deployments)",
+        "prompt": "CPA API Key",
+        "url": "",
+        "password": True,
+        "category": "provider",
+        "advanced": True,
+    },
+    "CPA_BASE_URL": {
+        "description": "CPA base URL (default: http://127.0.0.1:8317/v1)",
+        "prompt": "CPA Base URL",
+        "url": "",
+        "password": False,
+        "category": "provider",
+        "advanced": True,
+    },
     "OPENCODE_ZEN_API_KEY": {
         "description": "OpenCode Zen API key (pay-as-you-go access to curated models)",
         "prompt": "OpenCode Zen API key",
@@ -1588,6 +1604,7 @@ def show_config():
     
     keys = [
         ("OPENROUTER_API_KEY", "OpenRouter"),
+        ("CPA_API_KEY", "CPA"),
         ("VOICE_TOOLS_OPENAI_KEY", "OpenAI (STT/TTS)"),
         ("PARALLEL_API_KEY", "Parallel"),
         ("FIRECRAWL_API_KEY", "Firecrawl"),
