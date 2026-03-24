@@ -93,6 +93,9 @@ if _config_path.exists():
         import yaml as _yaml
         with open(_config_path, encoding="utf-8") as _f:
             _cfg = _yaml.safe_load(_f) or {}
+        # Expand ${ENV_VAR} references before bridging to env vars.
+        from hermes_cli.config import _expand_env_vars
+        _cfg = _expand_env_vars(_cfg)
         # Top-level simple values (fallback only — don't override .env)
         for _key, _val in _cfg.items():
             if isinstance(_val, (str, int, float, bool)) and _key not in os.environ:
@@ -363,6 +366,10 @@ class GatewayRunner:
         # Key: session_key, Value: {"command": str, "pattern_key": str, ...}
         self._pending_approvals: Dict[str, Dict[str, Any]] = {}
 
+        # Track platforms that failed to connect for background reconnection.
+        # Key: Platform enum, Value: {"config": platform_config, "attempts": int, "next_retry": float}
+        self._failed_platforms: Dict[Platform, Dict[str, Any]] = {}
+
         # Persistent Honcho managers keyed by gateway session key.
         # This preserves write_frequency="session" semantics across short-lived
         # per-message AIAgent instances.
@@ -521,6 +528,12 @@ class GatewayRunner:
         Synchronous worker — meant to be called via run_in_executor from
         an async context so it doesn't block the event loop.
         """
+        # Skip cron sessions — they run headless with no meaningful user
+        # conversation to extract memories from.
+        if old_session_id and old_session_id.startswith("cron_"):
+            logger.debug("Skipping memory flush for cron session: %s", old_session_id)
+            return
+
         try:
             history = self.session_store.load_transcript(old_session_id)
             if not history or len(history) < 4:
@@ -553,6 +566,23 @@ class GatewayRunner:
                 if m.get("role") in ("user", "assistant") and m.get("content")
             ]
 
+            # Read live memory state from disk so the flush agent can see
+            # what's already saved and avoid overwriting newer entries.
+            _current_memory = ""
+            try:
+                from tools.memory_tool import MEMORY_DIR
+                for fname, label in [
+                    ("MEMORY.md", "MEMORY (your personal notes)"),
+                    ("USER.md", "USER PROFILE (who the user is)"),
+                ]:
+                    fpath = MEMORY_DIR / fname
+                    if fpath.exists():
+                        content = fpath.read_text(encoding="utf-8").strip()
+                        if content:
+                            _current_memory += f"\n\n## Current {label}:\n{content}"
+            except Exception:
+                pass  # Non-fatal — flush still works, just without the guard
+
             # Give the agent a real turn to think about what to save
             flush_prompt = (
                 "[System: This session is about to be automatically reset due to "
@@ -564,6 +594,20 @@ class GatewayRunner:
                 "2. If you discovered a reusable workflow or solved a non-trivial "
                 "problem, consider saving it as a skill.\n"
                 "3. If nothing is worth saving, that's fine — just skip.\n\n"
+            )
+
+            if _current_memory:
+                flush_prompt += (
+                    "IMPORTANT — here is the current live state of memory. Other "
+                    "sessions, cron jobs, or the user may have updated it since this "
+                    "conversation ended. Do NOT overwrite or remove entries unless "
+                    "the conversation above reveals something that genuinely "
+                    "supersedes them. Only add new information that is not already "
+                    "captured below."
+                    f"{_current_memory}\n\n"
+                )
+
+            flush_prompt += (
                 "Do NOT respond to the user. Just use the memory and skill_manage "
                 "tools if needed, then stop.]"
             )
@@ -639,7 +683,11 @@ class GatewayRunner:
         return resolve_turn_route(user_message, getattr(self, "_smart_model_routing", {}), primary)
 
     async def _handle_adapter_fatal_error(self, adapter: BasePlatformAdapter) -> None:
-        """React to a non-retryable adapter failure after startup."""
+        """React to an adapter failure after startup.
+
+        If the error is retryable (e.g. network blip, DNS failure), queue the
+        platform for background reconnection instead of giving up permanently.
+        """
         logger.error(
             "Fatal %s adapter error (%s): %s",
             adapter.platform.value,
@@ -655,7 +703,21 @@ class GatewayRunner:
                 self.adapters.pop(adapter.platform, None)
                 self.delivery_router.adapters = self.adapters
 
-        if not self.adapters:
+        # Queue retryable failures for background reconnection
+        if adapter.fatal_error_retryable:
+            platform_config = self.config.platforms.get(adapter.platform)
+            if platform_config and adapter.platform not in self._failed_platforms:
+                self._failed_platforms[adapter.platform] = {
+                    "config": platform_config,
+                    "attempts": 0,
+                    "next_retry": time.monotonic() + 30,
+                }
+                logger.info(
+                    "%s queued for background reconnection",
+                    adapter.platform.value,
+                )
+
+        if not self.adapters and not self._failed_platforms:
             self._exit_reason = adapter.fatal_error_message or "All messaging adapters disconnected"
             if adapter.fatal_error_retryable:
                 self._exit_with_failure = True
@@ -663,6 +725,11 @@ class GatewayRunner:
             else:
                 logger.error("No connected messaging platforms remain. Shutting down gateway cleanly.")
             await self.stop()
+        elif not self.adapters and self._failed_platforms:
+            logger.warning(
+                "No connected messaging platforms remain, but %d platform(s) queued for reconnection",
+                len(self._failed_platforms),
+            )
 
     def _request_clean_exit(self, reason: str) -> None:
         self._exit_cleanly = True
@@ -877,7 +944,9 @@ class GatewayRunner:
             os.getenv(v)
             for v in ("TELEGRAM_ALLOWED_USERS", "DISCORD_ALLOWED_USERS",
                        "WHATSAPP_ALLOWED_USERS", "SLACK_ALLOWED_USERS",
-                       "SMS_ALLOWED_USERS",
+                       "SIGNAL_ALLOWED_USERS", "EMAIL_ALLOWED_USERS",
+                       "SMS_ALLOWED_USERS", "MATTERMOST_ALLOWED_USERS",
+                       "MATRIX_ALLOWED_USERS", "DINGTALK_ALLOWED_USERS",
                        "GATEWAY_ALLOWED_USERS")
         )
         _allow_all = os.getenv("GATEWAY_ALLOW_ALL_USERS", "").lower() in ("true", "1", "yes")
@@ -940,13 +1009,32 @@ class GatewayRunner:
                         target.append(
                             f"{platform.value}: {adapter.fatal_error_message}"
                         )
+                        # Queue for reconnection if the error is retryable
+                        if adapter.fatal_error_retryable:
+                            self._failed_platforms[platform] = {
+                                "config": platform_config,
+                                "attempts": 1,
+                                "next_retry": time.monotonic() + 30,
+                            }
                     else:
                         startup_retryable_errors.append(
                             f"{platform.value}: failed to connect"
                         )
+                        # No fatal error info means likely a transient issue — queue for retry
+                        self._failed_platforms[platform] = {
+                            "config": platform_config,
+                            "attempts": 1,
+                            "next_retry": time.monotonic() + 30,
+                        }
             except Exception as e:
                 logger.error("✗ %s error: %s", platform.value, e)
                 startup_retryable_errors.append(f"{platform.value}: {e}")
+                # Unexpected exceptions are typically transient — queue for retry
+                self._failed_platforms[platform] = {
+                    "config": platform_config,
+                    "attempts": 1,
+                    "next_retry": time.monotonic() + 30,
+                }
         
         if connected_count == 0:
             if startup_nonretryable_errors:
@@ -1026,6 +1114,15 @@ class GatewayRunner:
         # Start background session expiry watcher for proactive memory flushing
         asyncio.create_task(self._session_expiry_watcher())
 
+        # Start background reconnection watcher for platforms that failed at startup
+        if self._failed_platforms:
+            logger.info(
+                "Starting reconnection watcher for %d failed platform(s): %s",
+                len(self._failed_platforms),
+                ", ".join(p.value for p in self._failed_platforms),
+            )
+        asyncio.create_task(self._platform_reconnect_watcher())
+
         logger.info("Press Ctrl+C to stop")
         
         return True
@@ -1066,6 +1163,107 @@ class GatewayRunner:
             for _ in range(interval):
                 if not self._running:
                     break
+                await asyncio.sleep(1)
+
+    async def _platform_reconnect_watcher(self) -> None:
+        """Background task that periodically retries connecting failed platforms.
+
+        Uses exponential backoff: 30s → 60s → 120s → 240s → 300s (cap).
+        Stops retrying a platform after 20 failed attempts or if the error
+        is non-retryable (e.g. bad auth token).
+        """
+        _MAX_ATTEMPTS = 20
+        _BACKOFF_CAP = 300  # 5 minutes max between retries
+
+        await asyncio.sleep(10)  # initial delay — let startup finish
+        while self._running:
+            if not self._failed_platforms:
+                # Nothing to reconnect — sleep and check again
+                for _ in range(30):
+                    if not self._running:
+                        return
+                    await asyncio.sleep(1)
+                continue
+
+            now = time.monotonic()
+            for platform in list(self._failed_platforms.keys()):
+                if not self._running:
+                    return
+                info = self._failed_platforms[platform]
+                if now < info["next_retry"]:
+                    continue  # not time yet
+
+                if info["attempts"] >= _MAX_ATTEMPTS:
+                    logger.warning(
+                        "Giving up reconnecting %s after %d attempts",
+                        platform.value, info["attempts"],
+                    )
+                    del self._failed_platforms[platform]
+                    continue
+
+                platform_config = info["config"]
+                attempt = info["attempts"] + 1
+                logger.info(
+                    "Reconnecting %s (attempt %d/%d)...",
+                    platform.value, attempt, _MAX_ATTEMPTS,
+                )
+
+                try:
+                    adapter = self._create_adapter(platform, platform_config)
+                    if not adapter:
+                        logger.warning(
+                            "Reconnect %s: adapter creation returned None, removing from retry queue",
+                            platform.value,
+                        )
+                        del self._failed_platforms[platform]
+                        continue
+
+                    adapter.set_message_handler(self._handle_message)
+                    adapter.set_fatal_error_handler(self._handle_adapter_fatal_error)
+
+                    success = await adapter.connect()
+                    if success:
+                        self.adapters[platform] = adapter
+                        self._sync_voice_mode_state_to_adapter(adapter)
+                        self.delivery_router.adapters = self.adapters
+                        del self._failed_platforms[platform]
+                        logger.info("✓ %s reconnected successfully", platform.value)
+
+                        # Rebuild channel directory with the new adapter
+                        try:
+                            from gateway.channel_directory import build_channel_directory
+                            build_channel_directory(self.adapters)
+                        except Exception:
+                            pass
+                    else:
+                        # Check if the failure is non-retryable
+                        if adapter.has_fatal_error and not adapter.fatal_error_retryable:
+                            logger.warning(
+                                "Reconnect %s: non-retryable error (%s), removing from retry queue",
+                                platform.value, adapter.fatal_error_message,
+                            )
+                            del self._failed_platforms[platform]
+                        else:
+                            backoff = min(30 * (2 ** (attempt - 1)), _BACKOFF_CAP)
+                            info["attempts"] = attempt
+                            info["next_retry"] = time.monotonic() + backoff
+                            logger.info(
+                                "Reconnect %s failed, next retry in %ds",
+                                platform.value, backoff,
+                            )
+                except Exception as e:
+                    backoff = min(30 * (2 ** (attempt - 1)), _BACKOFF_CAP)
+                    info["attempts"] = attempt
+                    info["next_retry"] = time.monotonic() + backoff
+                    logger.warning(
+                        "Reconnect %s error: %s, next retry in %ds",
+                        platform.value, e, backoff,
+                    )
+
+            # Check every 10 seconds for platforms that need reconnection
+            for _ in range(10):
+                if not self._running:
+                    return
                 await asyncio.sleep(1)
 
     async def stop(self) -> None:
@@ -2573,9 +2771,6 @@ class GatewayRunner:
         """Handle /model command - show or change the current model."""
         import yaml
         from hermes_cli.models import (
-            normalize_provider_model_name,
-            parse_model_input,
-            validate_requested_model,
             curated_models_for_provider,
             normalize_provider,
             _PROVIDER_LABELS,
@@ -2654,71 +2849,13 @@ class GatewayRunner:
             lines.append("Switch provider: `/model provider-name` or `/model provider:model-name`")
             return "\n".join(lines)
 
-        # Parse provider:model syntax
-        target_provider, new_model = parse_model_input(args, current_provider)
-        new_model = normalize_provider_model_name(target_provider, new_model)
-
-        # Detect custom/local provider — skip auto-detection to prevent
-        # silently accepting an OpenRouter model name on a localhost endpoint.
-        # Users must use explicit provider:model syntax to switch away.
-        _resolved_base = ""
-        try:
-            from hermes_cli.runtime_provider import resolve_runtime_provider as _rtp
-            _resolved_base = _rtp(requested=current_provider).get("base_url", "")
-        except Exception:
-            pass
-        is_custom = current_provider == "custom" or (
-            "localhost" in _resolved_base or "127.0.0.1" in _resolved_base
-        )
-
-        # Auto-detect provider when no explicit provider:model syntax was used
-        if target_provider == current_provider and not is_custom:
-            from hermes_cli.models import detect_provider_for_model
-            detected = detect_provider_for_model(new_model, current_provider)
-            if detected:
-                target_provider, new_model = detected
-        provider_changed = target_provider != current_provider
-
-        # Resolve credentials for the target provider (for API probe)
-        api_key = os.getenv("OPENROUTER_API_KEY") or os.getenv("OPENAI_API_KEY") or ""
-        base_url = "https://openrouter.ai/api/v1"
-        if provider_changed:
-            try:
-                from hermes_cli.runtime_provider import resolve_runtime_provider
-                runtime = resolve_runtime_provider(requested=target_provider)
-                api_key = runtime.get("api_key", "")
-                base_url = runtime.get("base_url", "")
-            except Exception as e:
-                provider_label = _PROVIDER_LABELS.get(target_provider, target_provider)
-                return f"⚠️ Could not resolve credentials for provider '{provider_label}': {e}"
-        else:
-            # Use current provider's base_url from config or registry
-            try:
-                from hermes_cli.runtime_provider import resolve_runtime_provider
-                runtime = resolve_runtime_provider(requested=current_provider)
-                api_key = runtime.get("api_key", "")
-                base_url = runtime.get("base_url", "")
-            except Exception:
-                pass
-
-        # Validate the model against the live API
-        try:
-            validation = validate_requested_model(
-                new_model,
-                target_provider,
-                api_key=api_key,
-                base_url=base_url,
-            )
-        except Exception:
-            validation = {"accepted": True, "persist": True, "recognized": False, "message": None}
-
-        if not validation.get("accepted"):
-            msg = validation.get("message", "Invalid model")
-            tip = "\n\nUse `/model` to see available models, `/provider` to see providers" if "Did you mean" not in msg else ""
-            return f"⚠️ {msg}{tip}"
-
-        # Persist to config only if validation approves
-        if validation.get("persist"):
+        # Handle bare "/model custom" — switch to custom provider
+        # and auto-detect the model from the endpoint.
+        if args.strip().lower() == "custom":
+            from hermes_cli.model_switch import switch_to_custom_provider
+            cust_result = switch_to_custom_provider()
+            if not cust_result.success:
+                return f"⚠️ {cust_result.error_message}"
             try:
                 user_config = {}
                 if config_path.exists():
@@ -2726,45 +2863,99 @@ class GatewayRunner:
                         user_config = yaml.safe_load(f) or {}
                 if "model" not in user_config or not isinstance(user_config["model"], dict):
                     user_config["model"] = {}
-                user_config["model"]["default"] = new_model
-                if provider_changed:
-                    user_config["model"]["provider"] = target_provider
+                user_config["model"]["default"] = cust_result.model
+                user_config["model"]["provider"] = "custom"
+                user_config["model"]["base_url"] = cust_result.base_url
+                with open(config_path, 'w', encoding="utf-8") as f:
+                    yaml.dump(user_config, f, default_flow_style=False, sort_keys=False)
+            except Exception as e:
+                return f"⚠️ Failed to save model change: {e}"
+            os.environ["HERMES_MODEL"] = cust_result.model
+            os.environ["HERMES_INFERENCE_PROVIDER"] = "custom"
+            self._effective_model = None
+            self._effective_provider = None
+            return (
+                f"🤖 Model changed to `{cust_result.model}` (saved to config)\n"
+                f"**Provider:** Custom\n"
+                f"**Endpoint:** `{cust_result.base_url}`\n"
+                f"_Model auto-detected from endpoint. Takes effect on next message._"
+            )
+
+        # Core model-switching pipeline (shared with CLI)
+        from hermes_cli.model_switch import switch_model
+
+        # Resolve current base_url for is_custom detection
+        _resolved_base = ""
+        try:
+            from hermes_cli.runtime_provider import resolve_runtime_provider as _rtp
+            _resolved_base = _rtp(requested=current_provider).get("base_url", "")
+        except Exception:
+            pass
+
+        result = switch_model(
+            args,
+            current_provider,
+            current_base_url=_resolved_base,
+            current_api_key=os.getenv("OPENROUTER_API_KEY") or os.getenv("OPENAI_API_KEY") or "",
+        )
+
+        if not result.success:
+            msg = result.error_message
+            tip = "\n\nUse `/model` to see available models, `/provider` to see providers" if "Did you mean" not in msg else ""
+            return f"⚠️ {msg}{tip}"
+
+        # Persist to config only if validation approves
+        if result.persist:
+            try:
+                user_config = {}
+                if config_path.exists():
+                    with open(config_path, encoding="utf-8") as f:
+                        user_config = yaml.safe_load(f) or {}
+                if "model" not in user_config or not isinstance(user_config["model"], dict):
+                    user_config["model"] = {}
+                user_config["model"]["default"] = result.new_model
+                if result.provider_changed:
+                    user_config["model"]["provider"] = result.target_provider
+                    # Persist base_url for custom endpoints; clear when
+                    # switching away from custom (#2562 Phase 2).
+                    if result.base_url and "openrouter.ai" not in (result.base_url or ""):
+                        user_config["model"]["base_url"] = result.base_url
+                    else:
+                        user_config["model"].pop("base_url", None)
                 with open(config_path, 'w', encoding="utf-8") as f:
                     yaml.dump(user_config, f, default_flow_style=False, sort_keys=False)
             except Exception as e:
                 return f"⚠️ Failed to save model change: {e}"
 
         # Set env vars so the next agent run picks up the change
-        os.environ["HERMES_MODEL"] = new_model
-        if provider_changed:
-            os.environ["HERMES_INFERENCE_PROVIDER"] = target_provider
+        os.environ["HERMES_MODEL"] = result.new_model
+        if result.provider_changed:
+            os.environ["HERMES_INFERENCE_PROVIDER"] = result.target_provider
 
-        provider_label = _PROVIDER_LABELS.get(target_provider, target_provider)
-        provider_note = f"\n**Provider:** {provider_label}" if provider_changed else ""
+        provider_note = f"\n**Provider:** {result.provider_label}" if result.provider_changed else ""
 
         warning = ""
-        if validation.get("message"):
-            warning = f"\n⚠️ {validation['message']}"
+        if result.warning_message:
+            warning = f"\n⚠️ {result.warning_message}"
 
-        if validation.get("persist"):
-            persist_note = "saved to config"
-        else:
-            persist_note = "this session only — will revert on restart"
+        persist_note = "saved to config" if result.persist else "this session only — will revert on restart"
+
         # Clear fallback state since user explicitly chose a model
         self._effective_model = None
         self._effective_provider = None
 
-        # Helpful hint when staying on a custom/local endpoint
+        # Show endpoint info for custom providers
         custom_hint = ""
-        if is_custom and not provider_changed:
-            endpoint = _resolved_base or "custom endpoint"
-            custom_hint = (
-                f"\n**Endpoint:** `{endpoint}`"
-                "\n_To switch providers, use_ `/model provider:model`"
-                "\n_e.g._ `/model openrouter:anthropic/claude-sonnet-4`"
-            )
+        if result.is_custom_target:
+            endpoint = result.base_url or _resolved_base or "custom endpoint"
+            custom_hint = f"\n**Endpoint:** `{endpoint}`"
+            if not result.provider_changed:
+                custom_hint += (
+                    "\n_To switch providers, use_ `/model provider:model`"
+                    "\n_e.g._ `/model openrouter:anthropic/claude-sonnet-4`"
+                )
 
-        return f"🤖 Model changed to `{new_model}` ({persist_note}){provider_note}{warning}{custom_hint}\n_(takes effect on next message)_"
+        return f"🤖 Model changed to `{result.new_model}` ({persist_note}){provider_note}{warning}{custom_hint}\n_(takes effect on next message)_"
 
     async def _handle_provider_command(self, event: MessageEvent) -> str:
         """Handle /provider command - show available providers."""
