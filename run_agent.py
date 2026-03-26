@@ -91,7 +91,12 @@ from agent.model_metadata import (
 )
 from agent.context_compressor import ContextCompressor
 from agent.prompt_caching import apply_anthropic_cache_control
-from agent.prompt_builder import build_skills_system_prompt, build_context_files_prompt, load_soul_md
+from agent.prompt_builder import (
+    build_skills_system_prompt,
+    build_tooling_system_prompt,
+    build_context_files_prompt,
+    load_soul_md,
+)
 from agent.usage_pricing import estimate_usage_cost, normalize_usage
 from agent.display import (
     KawaiiSpinner, build_tool_preview as _build_tool_preview,
@@ -569,6 +574,8 @@ class AIAgent:
         self._delegate_depth = 0        # 0 = top-level agent, incremented for children
         self._active_children = []      # Running child AIAgents (for interrupt propagation)
         self._active_children_lock = threading.Lock()
+        self._consecutive_delegate_failures = 0
+        self._delegate_failure_threshold = 3
         
         # Store OpenRouter provider preferences
         self.providers_allowed = providers_allowed
@@ -2371,6 +2378,14 @@ class AIAgent:
                 if user_block:
                     prompt_parts.append(user_block)
 
+        active_toolsets = set(self.enabled_toolsets or [])
+        tooling_prompt = build_tooling_system_prompt(
+            available_tools=self.valid_tool_names,
+            available_toolsets=active_toolsets,
+        )
+        if tooling_prompt:
+            prompt_parts.append(tooling_prompt)
+
         has_skills_tools = any(name in self.valid_tool_names for name in ['skills_list', 'skill_view', 'skill_manage'])
         if has_skills_tools:
             avail_toolsets = {ts for ts, avail in check_toolset_requirements().items() if avail}
@@ -2399,10 +2414,10 @@ class AIAgent:
             timestamp_line += f"\nProvider: {self.provider}"
         prompt_parts.append(timestamp_line)
 
-        # Alibaba Coding Plan API always returns "glm-4.7" as model name regardless
+        # Bailian Coding Plan API always returns "glm-4.7" as model name regardless
         # of the requested model. Inject explicit model identity into the system prompt
         # so the agent can correctly report which model it is (workaround for API bug).
-        if self.provider == "alibaba":
+        if self.provider == "bailian":
             _model_short = self.model.split("/")[-1] if "/" in self.model else self.model
             prompt_parts.append(
                 f"You are powered by the model named {_model_short}. "
@@ -2514,6 +2529,50 @@ class AIAgent:
             delegate_count - MAX_CONCURRENT_CHILDREN, MAX_CONCURRENT_CHILDREN,
         )
         return truncated
+
+    def _delegate_short_circuit_error(self) -> str:
+        return json.dumps({
+            "error": (
+                "Delegation disabled for this request after "
+                f"{self._consecutive_delegate_failures} consecutive failures. "
+                "Do not call delegate_task again. Respond to the user with an explanation only. "
+                "Do not attempt alternative execution or additional delegation in this request."
+            ),
+            "circuit_open": True,
+            "consecutive_failures": self._consecutive_delegate_failures,
+            "instruction": "explain_only",
+        }, ensure_ascii=False)
+
+    def _record_delegate_result(self, function_result: Any) -> None:
+        payload = None
+        if isinstance(function_result, str):
+            try:
+                payload = json.loads(function_result)
+            except Exception:
+                payload = None
+        elif isinstance(function_result, dict):
+            payload = function_result
+
+        failed = False
+        if isinstance(payload, dict):
+            if payload.get("error"):
+                failed = True
+            elif isinstance(payload.get("results"), list):
+                results = payload.get("results") or []
+                if results:
+                    statuses = {
+                        str(item.get("status", "")).lower()
+                        for item in results
+                        if isinstance(item, dict)
+                    }
+                    any_success = any(status in {"completed", "ok"} for status in statuses)
+                    any_failure = any(status in {"failed", "error"} for status in statuses)
+                    failed = any_failure and not any_success
+
+        if failed:
+            self._consecutive_delegate_failures += 1
+        else:
+            self._consecutive_delegate_failures = 0
 
     @staticmethod
     def _deduplicate_tool_calls(tool_calls: list) -> list:
@@ -4046,8 +4105,8 @@ class AIAgent:
         return transformed
 
     def _anthropic_preserve_dots(self) -> bool:
-        """True when using Alibaba/DashScope anthropic-compatible endpoint (model names keep dots, e.g. qwen3.5-plus)."""
-        if (getattr(self, "provider", "") or "").lower() == "alibaba":
+        """True when using Bailian/DashScope anthropic-compatible endpoint (model names keep dots, e.g. qwen3.5-plus)."""
+        if (getattr(self, "provider", "") or "").lower() == "bailian":
             return True
         base = (getattr(self, "base_url", "") or "").lower()
         return "dashscope" in base or "aliyuncs" in base
@@ -4716,8 +4775,10 @@ class AIAgent:
                 callback=self.clarify_callback,
             )
         elif function_name == "delegate_task":
+            if self._consecutive_delegate_failures >= self._delegate_failure_threshold:
+                return self._delegate_short_circuit_error()
             from tools.delegate_tool import delegate_task as _delegate_task
-            return _delegate_task(
+            result = _delegate_task(
                 goal=function_args.get("goal"),
                 context=function_args.get("context"),
                 toolsets=function_args.get("toolsets"),
@@ -4725,6 +4786,8 @@ class AIAgent:
                 max_iterations=function_args.get("max_iterations"),
                 parent_agent=self,
             )
+            self._record_delegate_result(result)
+            return result
         else:
             return handle_function_call(
                 function_name, function_args, effective_task_id,
@@ -5052,38 +5115,46 @@ class AIAgent:
                 if self.quiet_mode:
                     self._vprint(f"  {_get_cute_tool_message_impl('clarify', function_args, tool_duration, result=function_result)}")
             elif function_name == "delegate_task":
-                from tools.delegate_tool import delegate_task as _delegate_task
-                tasks_arg = function_args.get("tasks")
-                if tasks_arg and isinstance(tasks_arg, list):
-                    spinner_label = f"🔀 delegating {len(tasks_arg)} tasks"
-                else:
-                    goal_preview = (function_args.get("goal") or "")[:30]
-                    spinner_label = f"🔀 {goal_preview}" if goal_preview else "🔀 delegating"
-                spinner = None
-                if self.quiet_mode:
-                    face = random.choice(KawaiiSpinner.KAWAII_WAITING)
-                    spinner = KawaiiSpinner(f"{face} {spinner_label}", spinner_type='dots')
-                    spinner.start()
-                self._delegate_spinner = spinner
-                _delegate_result = None
-                try:
-                    function_result = _delegate_task(
-                        goal=function_args.get("goal"),
-                        context=function_args.get("context"),
-                        toolsets=function_args.get("toolsets"),
-                        tasks=tasks_arg,
-                        max_iterations=function_args.get("max_iterations"),
-                        parent_agent=self,
-                    )
-                    _delegate_result = function_result
-                finally:
-                    self._delegate_spinner = None
+                if self._consecutive_delegate_failures >= self._delegate_failure_threshold:
+                    function_result = self._delegate_short_circuit_error()
                     tool_duration = time.time() - tool_start_time
-                    cute_msg = _get_cute_tool_message_impl('delegate_task', function_args, tool_duration, result=_delegate_result)
-                    if spinner:
-                        spinner.stop(cute_msg)
-                    elif self.quiet_mode:
+                    cute_msg = _get_cute_tool_message_impl('delegate_task', function_args, tool_duration, result=function_result)
+                    if self.quiet_mode:
                         self._vprint(f"  {cute_msg}")
+                else:
+                    from tools.delegate_tool import delegate_task as _delegate_task
+                    tasks_arg = function_args.get("tasks")
+                    if tasks_arg and isinstance(tasks_arg, list):
+                        spinner_label = f"🔀 delegating {len(tasks_arg)} tasks"
+                    else:
+                        goal_preview = (function_args.get("goal") or "")[:30]
+                        spinner_label = f"🔀 {goal_preview}" if goal_preview else "🔀 delegating"
+                    spinner = None
+                    if self.quiet_mode:
+                        face = random.choice(KawaiiSpinner.KAWAII_WAITING)
+                        spinner = KawaiiSpinner(f"{face} {spinner_label}", spinner_type='dots')
+                        spinner.start()
+                    self._delegate_spinner = spinner
+                    _delegate_result = None
+                    try:
+                        function_result = _delegate_task(
+                            goal=function_args.get("goal"),
+                            context=function_args.get("context"),
+                            toolsets=function_args.get("toolsets"),
+                            tasks=tasks_arg,
+                            max_iterations=function_args.get("max_iterations"),
+                            parent_agent=self,
+                        )
+                        _delegate_result = function_result
+                        self._record_delegate_result(function_result)
+                    finally:
+                        self._delegate_spinner = None
+                        tool_duration = time.time() - tool_start_time
+                        cute_msg = _get_cute_tool_message_impl('delegate_task', function_args, tool_duration, result=_delegate_result)
+                        if spinner:
+                            spinner.stop(cute_msg)
+                        elif self.quiet_mode:
+                            self._vprint(f"  {cute_msg}")
             elif self.quiet_mode:
                 face = random.choice(KawaiiSpinner.KAWAII_WAITING)
                 emoji = _get_tool_emoji(function_name)

@@ -413,6 +413,38 @@ def build_skills_system_prompt(
     )
 
 
+def build_tooling_system_prompt(
+    available_tools: "set[str] | None" = None,
+    available_toolsets: "set[str] | None" = None,
+) -> str:
+    """Build a compact summary of the tools available in this session."""
+    tools = sorted(available_tools or set())
+    toolsets = sorted(available_toolsets or set())
+
+    if not tools and not toolsets:
+        return ""
+
+    lines = [
+        "## Runtime Tooling",
+        "Use only the capabilities listed here when planning or acting.",
+    ]
+
+    if toolsets:
+        lines.append(f"Enabled toolsets: {', '.join(toolsets)}")
+    else:
+        lines.append("Enabled toolsets: none")
+
+    if tools:
+        lines.append(f"Callable tools: {', '.join(tools)}")
+    else:
+        lines.append("Callable tools: none")
+
+    lines.append(
+        "If a tool or toolset is not listed here, treat it as unavailable in this session."
+    )
+    return "\n".join(lines)
+
+
 # =========================================================================
 # Context files (SOUL.md, AGENTS.md, .cursorrules)
 # =========================================================================

@@ -21,7 +21,10 @@ import logging
 logger = logging.getLogger(__name__)
 import os
 import time
+import threading
+import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 
@@ -38,6 +41,7 @@ MAX_CONCURRENT_CHILDREN = 3
 MAX_DEPTH = 2  # parent (0) -> child (1) -> grandchild rejected (2)
 DEFAULT_MAX_ITERATIONS = 50
 DEFAULT_TOOLSETS = ["terminal", "file", "web"]
+ASYNC_EXECUTOR = ThreadPoolExecutor(max_workers=MAX_CONCURRENT_CHILDREN, thread_name_prefix="delegate-async")
 
 
 def check_delegate_requirements() -> bool:
@@ -73,6 +77,61 @@ def _strip_blocked_tools(toolsets: List[str]) -> List[str]:
         "delegation", "clarify", "memory", "code_execution",
     }
     return [t for t in toolsets if t not in blocked_toolset_names]
+
+
+def _resolve_child_toolsets(
+    explicit_toolsets: Optional[List[str]],
+    delegation_cfg: Optional[dict],
+    parent_agent,
+) -> List[str]:
+    """Resolve the default toolsets a child agent should receive."""
+    if explicit_toolsets:
+        return _strip_blocked_tools(explicit_toolsets)
+
+    configured_toolsets = delegation_cfg.get("default_toolsets") if delegation_cfg else None
+    if isinstance(configured_toolsets, list) and configured_toolsets:
+        return _strip_blocked_tools(configured_toolsets)
+
+    if parent_agent and getattr(parent_agent, "enabled_toolsets", None):
+        return _strip_blocked_tools(parent_agent.enabled_toolsets)
+
+    return _strip_blocked_tools(DEFAULT_TOOLSETS)
+
+
+def _truncate_for_parent_session(content: str, max_chars: int = 2500) -> str:
+    if len(content) <= max_chars:
+        return content
+    return content[: max_chars - 36] + "\n\n[...delegated result truncated...]"
+
+
+def _append_to_parent_session(session_id: Optional[str], content: str) -> bool:
+    """Append a system note into the parent session transcript."""
+    if not session_id or not content:
+        return False
+
+    message = {"role": "system", "content": content}
+
+    try:
+        from hermes_state import SessionDB
+
+        db = SessionDB()
+        try:
+            db.append_message(session_id=session_id, role="system", content=content)
+        finally:
+            db.close()
+    except Exception as e:
+        logger.debug("Failed to append delegated result to SessionDB: %s", e)
+        return False
+
+    try:
+        hermes_home = Path(os.getenv("HERMES_HOME", Path.home() / ".hermes"))
+        transcript_path = hermes_home / "sessions" / f"{session_id}.jsonl"
+        with open(transcript_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(message, ensure_ascii=False) + "\n")
+    except Exception as e:
+        logger.debug("Failed to mirror delegated result into transcript JSONL: %s", e)
+
+    return True
 
 
 def _build_child_progress_callback(task_index: int, parent_agent, task_count: int = 1) -> Optional[callable]:
@@ -160,6 +219,10 @@ def _build_child_agent(
     override_base_url: Optional[str] = None,
     override_api_key: Optional[str] = None,
     override_api_mode: Optional[str] = None,
+    delegation_cfg: Optional[dict] = None,
+    enable_progress: bool = True,
+    register_with_parent: bool = True,
+    share_iteration_budget: bool = True,
 ):
     """
     Build a child AIAgent on the main thread (thread-safe construction).
@@ -173,14 +236,7 @@ def _build_child_agent(
     from run_agent import AIAgent
     import model_tools
 
-    # When no explicit toolsets given, inherit from parent's enabled toolsets
-    # so disabled tools (e.g. web) don't leak to subagents.
-    if toolsets:
-        child_toolsets = _strip_blocked_tools(toolsets)
-    elif parent_agent and getattr(parent_agent, "enabled_toolsets", None):
-        child_toolsets = _strip_blocked_tools(parent_agent.enabled_toolsets)
-    else:
-        child_toolsets = _strip_blocked_tools(DEFAULT_TOOLSETS)
+    child_toolsets = _resolve_child_toolsets(toolsets, delegation_cfg, parent_agent)
 
     child_prompt = _build_child_system_prompt(goal, context)
     # Extract parent's API key so subagents inherit auth (e.g. Nous Portal).
@@ -189,11 +245,11 @@ def _build_child_agent(
         parent_api_key = parent_agent._client_kwargs.get("api_key")
 
     # Build progress callback to relay tool calls to parent display
-    child_progress_cb = _build_child_progress_callback(task_index, parent_agent)
+    child_progress_cb = _build_child_progress_callback(task_index, parent_agent) if enable_progress else None
 
     # Share the parent's iteration budget so subagent tool calls
     # count toward the session-wide limit.
-    shared_budget = getattr(parent_agent, "iteration_budget", None)
+    shared_budget = getattr(parent_agent, "iteration_budget", None) if share_iteration_budget else None
 
     # Resolve effective credentials: config override > parent inherit
     effective_model = model or parent_agent.model
@@ -236,7 +292,7 @@ def _build_child_agent(
     child._delegate_depth = getattr(parent_agent, '_delegate_depth', 0) + 1
 
     # Register child for interrupt propagation
-    if hasattr(parent_agent, '_active_children'):
+    if register_with_parent and hasattr(parent_agent, '_active_children'):
         lock = getattr(parent_agent, '_active_children_lock', None)
         if lock:
             with lock:
@@ -395,6 +451,76 @@ def _run_single_child(
             except (ValueError, UnboundLocalError) as e:
                 logger.debug("Could not remove child from active_children: %s", e)
 
+
+def _format_async_completion_note(
+    async_task_id: str,
+    task_list: List[Dict[str, Any]],
+    results: List[Dict[str, Any]],
+) -> str:
+    lines = [f"[Delegated Task Completed: {async_task_id}]"]
+    for idx, task in enumerate(task_list):
+        entry = results[idx] if idx < len(results) else {}
+        goal = str(task.get("goal", "")).strip()
+        status = str(entry.get("status", "unknown"))
+        summary = str(entry.get("summary") or "").strip()
+        error = str(entry.get("error") or "").strip()
+        lines.append(f"- Task {idx + 1}: {goal}")
+        lines.append(f"  Status: {status}")
+        if summary:
+            lines.append(f"  Summary: {summary}")
+        elif error:
+            lines.append(f"  Error: {error}")
+
+    return _truncate_for_parent_session("\n".join(lines))
+
+
+def _run_async_delegate(
+    *,
+    async_task_id: str,
+    task_list: List[Dict[str, Any]],
+    children: List[Any],
+    parent_session_id: Optional[str],
+) -> None:
+    results: List[Dict[str, Any]] = []
+    try:
+        if len(children) == 1:
+            results.append(_run_single_child(0, task_list[0]["goal"], children[0], None))
+        else:
+            with ThreadPoolExecutor(max_workers=MAX_CONCURRENT_CHILDREN) as executor:
+                futures = {
+                    executor.submit(_run_single_child, idx, task_list[idx]["goal"], child, None): idx
+                    for idx, child in enumerate(children)
+                }
+                for future in as_completed(futures):
+                    idx = futures[future]
+                    try:
+                        entry = future.result()
+                    except Exception as exc:
+                        entry = {
+                            "task_index": idx,
+                            "status": "error",
+                            "summary": None,
+                            "error": str(exc),
+                            "api_calls": 0,
+                            "duration_seconds": 0,
+                        }
+                    results.append(entry)
+            results.sort(key=lambda r: r["task_index"])
+    except Exception as exc:
+        logger.exception("Async delegated task %s crashed", async_task_id)
+        results = [{
+            "task_index": 0,
+            "status": "error",
+            "summary": None,
+            "error": str(exc),
+            "api_calls": 0,
+            "duration_seconds": 0,
+        }]
+
+    note = _format_async_completion_note(async_task_id, task_list, results)
+    if parent_session_id:
+        _append_to_parent_session(parent_session_id, note)
+
 def delegate_task(
     goal: Optional[str] = None,
     context: Optional[str] = None,
@@ -429,6 +555,7 @@ def delegate_task(
     cfg = _load_config()
     default_max_iter = cfg.get("max_iterations", DEFAULT_MAX_ITERATIONS)
     effective_max_iter = max_iterations or default_max_iter
+    async_mode = bool(cfg.get("async_mode")) and depth == 0
 
     # Resolve delegation credentials (provider:model pair).
     # When delegation.provider is configured, this resolves the full credential
@@ -482,6 +609,10 @@ def delegate_task(
                 override_provider=creds["provider"], override_base_url=creds["base_url"],
                 override_api_key=creds["api_key"],
                 override_api_mode=creds["api_mode"],
+                delegation_cfg=cfg,
+                enable_progress=not async_mode,
+                register_with_parent=not async_mode,
+                share_iteration_budget=not async_mode,
             )
             # Override with correct parent tool names (before child construction mutated global)
             child._delegate_saved_tool_names = _parent_tool_names
@@ -489,6 +620,27 @@ def delegate_task(
     finally:
         # Authoritative restore: reset global to parent's tool names after all children built
         _model_tools._last_resolved_tool_names = _parent_tool_names
+
+    if async_mode:
+        async_task_id = f"adt_{uuid.uuid4().hex[:12]}"
+        child_list = [child for _, _, child in children]
+        ASYNC_EXECUTOR.submit(
+            _run_async_delegate,
+            async_task_id=async_task_id,
+            task_list=task_list,
+            children=child_list,
+            parent_session_id=getattr(parent_agent, "session_id", None),
+        )
+        return json.dumps({
+            "accepted": True,
+            "async": True,
+            "task_id": async_task_id,
+            "task_count": len(task_list),
+            "message": (
+                "Delegated task accepted and running in background. "
+                "Its result will be injected into the parent session when complete."
+            ),
+        }, ensure_ascii=False)
 
     if n_tasks == 1:
         # Single task -- run directly (no thread pool overhead)
@@ -582,18 +734,56 @@ def _resolve_delegation_credentials(cfg: dict, parent_agent) -> dict:
     configured_base_url = str(cfg.get("base_url") or "").strip() or None
     configured_api_key = str(cfg.get("api_key") or "").strip() or None
 
+    if configured_provider and configured_provider != "custom":
+        # Prefer the runtime provider system for named providers (including
+        # bailian) so provider-specific auth env vars and api_mode rules are
+        # respected. An explicit delegation.base_url still overrides the
+        # resolved URL, but credentials come from the provider.
+        try:
+            from hermes_cli.runtime_provider import resolve_runtime_provider
+            runtime = resolve_runtime_provider(requested=configured_provider)
+        except Exception as exc:
+            raise ValueError(
+                f"Cannot resolve delegation provider '{configured_provider}': {exc}. "
+                f"Check that the provider is configured (API key set, valid provider name), "
+                f"or set delegation.base_url/delegation.api_key for a direct endpoint."
+            ) from exc
+
+        api_key = configured_api_key or runtime.get("api_key", "")
+        if not api_key:
+            raise ValueError(
+                f"Delegation provider '{configured_provider}' resolved but has no API key. "
+                f"Set the appropriate environment variable or run 'hermes login'."
+            )
+
+        return {
+            "model": configured_model,
+            "provider": runtime.get("provider", configured_provider),
+            "base_url": configured_base_url or runtime.get("base_url"),
+            "api_key": api_key,
+            "api_mode": runtime.get("api_mode"),
+        }
+
     if configured_base_url:
+        base_lower = configured_base_url.lower()
         api_key = (
             configured_api_key
             or os.getenv("OPENAI_API_KEY", "").strip()
+            or (
+                os.getenv("DASHSCOPE_API_KEY", "").strip()
+                if "dashscope.aliyuncs.com" in base_lower
+                else ""
+            )
         )
         if not api_key:
+            env_hint = "delegation.api_key or OPENAI_API_KEY"
+            if "dashscope.aliyuncs.com" in base_lower:
+                env_hint += " or DASHSCOPE_API_KEY"
             raise ValueError(
                 "Delegation base_url is configured but no API key was found. "
-                "Set delegation.api_key or OPENAI_API_KEY."
+                f"Set {env_hint}."
             )
 
-        base_lower = configured_base_url.lower()
         provider = "custom"
         api_mode = "chat_completions"
         if "chatgpt.com/backend-api/codex" in base_lower:
@@ -703,7 +893,10 @@ DELEGATE_TASK_SCHEMA = {
         "- Subagents CANNOT call: delegate_task, clarify, memory, send_message, "
         "execute_code.\n"
         "- Each subagent gets its own terminal session (separate working directory and state).\n"
-        "- Results are always returned as an array, one entry per task."
+        "- Results are always returned as an array, one entry per task.\n"
+        "- When delegation.async_mode is enabled, this tool may return immediately "
+        "with a background task id instead of waiting. The final result is then "
+        "injected into the parent session transcript later."
     ),
     "parameters": {
         "type": "object",
