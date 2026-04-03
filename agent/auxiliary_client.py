@@ -971,13 +971,6 @@ def resolve_provider_client(
         creds = resolve_api_key_provider_credentials(provider)
         api_key = str(creds.get("api_key", "")).strip()
         base_url = str(creds.get("base_url", "")).strip().rstrip("/") or pconfig.inference_base_url
-        if provider == "cpa" and not api_key:
-            try:
-                from agent.model_metadata import is_local_endpoint
-            except Exception:
-                is_local_endpoint = None
-            if callable(is_local_endpoint) and is_local_endpoint(base_url):
-                api_key = "no-key-required"
         if not api_key:
             tried_sources = list(pconfig.api_key_env_vars)
             if provider == "copilot":
@@ -988,7 +981,7 @@ def resolve_provider_client(
             return None, None
 
         default_model = _API_KEY_PROVIDER_AUX_MODELS.get(provider, "")
-        final_model = model or ( _read_main_model() if provider == "cpa" else "" ) or default_model or "gpt-4o-mini"
+        final_model = model or ( _read_main_model() if provider == "bailian" else "" ) or default_model or "gpt-4o-mini"
 
         # Provider-specific headers
         headers = {}

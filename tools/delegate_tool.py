@@ -42,6 +42,13 @@ MAX_DEPTH = 2  # parent (0) -> child (1) -> grandchild rejected (2)
 DEFAULT_MAX_ITERATIONS = 50
 DEFAULT_TOOLSETS = ["terminal", "file", "web"]
 ASYNC_EXECUTOR = ThreadPoolExecutor(max_workers=MAX_CONCURRENT_CHILDREN, thread_name_prefix="delegate-async")
+_completion_listener = None
+
+
+def set_completion_listener(cb):
+    """Register a callback invoked when an async delegated task completes."""
+    global _completion_listener
+    _completion_listener = cb
 
 
 def check_delegate_requirements() -> bool:
@@ -480,9 +487,17 @@ def _run_async_delegate(
     task_list: List[Dict[str, Any]],
     children: List[Any],
     parent_session_id: Optional[str],
+    parent_session_key: Optional[str],
 ) -> None:
     results: List[Dict[str, Any]] = []
+    prev_session_key = os.getenv("HERMES_SESSION_KEY")
+    prev_async_task_id = os.getenv("HERMES_ASYNC_TASK_ID")
+    prev_async_approval_mode = os.getenv("HERMES_ASYNC_APPROVAL_MODE")
     try:
+        if parent_session_key:
+            os.environ["HERMES_SESSION_KEY"] = parent_session_key
+        os.environ["HERMES_ASYNC_TASK_ID"] = async_task_id
+        os.environ["HERMES_ASYNC_APPROVAL_MODE"] = "wait"
         if len(children) == 1:
             results.append(_run_single_child(0, task_list[0]["goal"], children[0], None))
         else:
@@ -517,9 +532,32 @@ def _run_async_delegate(
             "duration_seconds": 0,
         }]
 
-    note = _format_async_completion_note(async_task_id, task_list, results)
-    if parent_session_id:
-        _append_to_parent_session(parent_session_id, note)
+    finally:
+        note = _format_async_completion_note(async_task_id, task_list, results)
+        if parent_session_id:
+            _append_to_parent_session(parent_session_id, note)
+        if _completion_listener is not None:
+            try:
+                _completion_listener(
+                    async_task_id=async_task_id,
+                    parent_session_id=parent_session_id,
+                    parent_session_key=parent_session_key,
+                    note=note,
+                )
+            except Exception:
+                logger.debug("Async completion listener failed", exc_info=True)
+        if prev_session_key is None:
+            os.environ.pop("HERMES_SESSION_KEY", None)
+        else:
+            os.environ["HERMES_SESSION_KEY"] = prev_session_key
+        if prev_async_task_id is None:
+            os.environ.pop("HERMES_ASYNC_TASK_ID", None)
+        else:
+            os.environ["HERMES_ASYNC_TASK_ID"] = prev_async_task_id
+        if prev_async_approval_mode is None:
+            os.environ.pop("HERMES_ASYNC_APPROVAL_MODE", None)
+        else:
+            os.environ["HERMES_ASYNC_APPROVAL_MODE"] = prev_async_approval_mode
 
 def delegate_task(
     goal: Optional[str] = None,
@@ -630,6 +668,7 @@ def delegate_task(
             task_list=task_list,
             children=child_list,
             parent_session_id=getattr(parent_agent, "session_id", None),
+            parent_session_key=os.getenv("HERMES_SESSION_KEY"),
         )
         return json.dumps({
             "accepted": True,

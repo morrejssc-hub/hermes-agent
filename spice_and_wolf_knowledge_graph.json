@@ -1,0 +1,204 @@
+{
+  "metadata": {
+    "title": "狼与香辛料 (Spice and Wolf) 知识图谱",
+    "source": "支仓冻砂 轻小说原著",
+    "created_date": "2026-03-27",
+    "dimensions": ["经济体系", "角色关系", "世界观设定", "哲学思想"],
+    "total_nodes": 156,
+    "total_edges": 248
+  },
+
+  "dimension_1_economics": {
+    "name": "经济体系",
+    "description": "中世纪欧洲风格的货币、贸易、商业系统",
+    "subdomains": {
+      "currency_system": {
+        "name": "货币体系",
+        "base_type": "银本位制",
+        "currencies": [
+          {"id": "curr_001", "name": "崔尼银币", "type": "银币", "issuer": "崔尼王国", "description": "刻有第11代国王侧脸，高含银量与信赖性", "value_reference": "1枚可供7天节俭生活", "trust_level": "高"},
+          {"id": "curr_002", "name": "卢米欧尼金币", "type": "金币", "description": "刻有大型商船图形，多种货币计算基准", "value_reference": "1枚约等于3个月生活费", "exchange_rate": "1枚≈27-40枚崔尼银币", "trust_level": "高"},
+          {"id": "curr_003", "name": "奴马金币", "type": "金币", "description": "两大金币之一", "trust_level": "中"},
+          {"id": "curr_004", "name": "皮里昂金币", "type": "金币", "description": "两大金币之一", "trust_level": "中"},
+          {"id": "curr_005", "name": "利马金币", "type": "金币", "issuer": "普罗亚尼王国西边沿岸", "exchange_rate": "1利马金币≈20崔尼银币", "trust_level": "中"},
+          {"id": "curr_006", "name": "太阳之金币", "type": "金币", "region": "北方区域", "description": "刻有太阳图形，代表平等喜悦", "trust_level": "中"},
+          {"id": "curr_007", "name": "伊雷多银币", "type": "银币", "exchange_rate": "10枚≈1/4枚崔尼银币", "trust_level": "中"},
+          {"id": "curr_008", "name": "菲林银币", "type": "银币", "description": "含银量普通但信赖度高", "trust_level": "高"},
+          {"id": "curr_009", "name": "路德银币", "type": "银币", "description": "含银量低，适合支付小花费", "trust_level": "低"},
+          {"id": "curr_010", "name": "艾尼铜币", "type": "铜币", "description": "找零用途小额货币", "trust_level": "低"},
+          {"id": "curr_011", "name": "托利耶铜币", "type": "铜币", "description": "找零用途小额货币", "trust_level": "低"},
+          {"id": "curr_012", "name": "修米铜币", "type": "铜币", "description": "刻有狼图形，山区当护身符", "special_use": "护身符", "trust_level": "低"}
+        ],
+        "economic_principles": [
+          {"id": "econ_001", "name": "货币信赖度理论", "description": "货币建立在信赖度上，将原本价值不高的东西设定成有价值"},
+          {"id": "econ_002", "name": "通货膨胀机制", "description": "国王回收货币重铸，减低含银量扩大发行量"},
+          {"id": "econ_003", "name": "劣币驱逐良币", "description": "中世纪货币架构不稳定", "related_concept": "格雷欣法则"}
+        ]
+      },
+      "trade_system": {
+        "name": "贸易系统",
+        "merchant_types": [
+          {"id": "merch_001", "name": "旅行商人", "description": "流动行商，被称为灰脚", "social_status": "低"},
+          {"id": "merch_002", "name": "特权商人", "description": "拥有固定店铺和特权", "social_status": "中"},
+          {"id": "merch_003", "name": "商行", "description": "大型商业组织如米隆商行", "social_status": "高"}
+        ],
+        "trade_goods": [
+          {"id": "good_001", "name": "香辛料", "category": "高利润商品", "characteristics": ["高利润", "轻体积"], "risk_level": "高"},
+          {"id": "good_002", "name": "麦子", "category": "农产品", "significance": "赫萝寄宿之物"},
+          {"id": "good_003", "name": "毛皮", "category": "奢侈品", "region": "北方区域"},
+          {"id": "good_004", "name": "武器粮草", "category": "军需品", "market_dynamics": "北方大远征期间价格波动大"}
+        ],
+        "trade_mechanisms": [
+          {"id": "mech_001", "name": "汇兑制度", "origin": "12世纪欧洲", "purpose": "避免携带大量现金"},
+          {"id": "mech_002", "name": "公证人制度", "purpose": "合约见证", "enforcement": "商会自律"},
+          {"id": "mech_003", "name": "期货交易", "description": "提前约定未来商品价格"}
+        ],
+        "transportation": [
+          {"id": "trans_001", "type": "水运", "advantages": ["运量大", "关卡税少"], "preference": "极度依赖"},
+          {"id": "trans_002", "type": "陆运", "vehicle": "马车", "disadvantages": ["成本高", "关卡税多"]}
+        ]
+      },
+      "commercial_organizations": {
+        "name": "商业组织",
+        "guilds": [{"id": "guild_001", "name": "罗恩商业公会", "functions": ["商人认证", "纠纷仲裁", "信息共享"]}],
+        "alliances": [
+          {"id": "all_001", "name": "北方商业同盟", "prototype": "汉萨同盟", "region": "北方"},
+          {"id": "all_002", "name": "南方城邦联盟", "prototype": "北意大利城邦", "advanced_systems": ["银行", "期货", "股份公司"]}
+        ],
+        "major_companies": [{"id": "comp_001", "name": "米隆商行", "description": "最大的商行", "influence": "可影响国家财政"}]
+      }
+    }
+  },
+
+  "dimension_2_relationships": {
+    "name": "角色关系",
+    "description": "角色间的互动、情感发展与关系网络",
+    "main_characters": [
+      {
+        "id": "char_001", "name": "克拉福·罗伦斯", "japanese_name": "クラフト・ロレンス", "role": "男主角", "occupation": "旅行商人", "age": "25岁", "characteristics": ["精明但善良", "滥好人", "梦想拥有店铺"], "voice_actor": "福山润"
+      },
+      {
+        "id": "char_002", "name": "赫萝", "japanese_name": "ホロ", "role": "女主角", "true_identity": "丰收之神/贤狼", "appearance": "15岁少女外表，狼耳尾巴", "hair_color": "亚麻色", "eye_color": "琥珀色", "origin": "约伊兹森林", "characteristics": ["冷静老练", "智慧丰富", "自大", "孤独", "吃货", "腹黑"], "likes": ["苹果", "甜食", "酒"], "voice_actor": "小清水亚美", "abilities": ["操控天气助麦子生长", "永生", "变身巨狼", "极强战斗力"]
+      }
+    ],
+    "supporting_characters": [
+      {"id": "char_003", "name": "诺儿菈·艾伦", "occupation": "牧羊女→教会司祭", "first_appearance": "小说第2卷", "voice_actor": "中原麻衣"},
+      {"id": "char_004", "name": "缪莉", "role": "罗伦斯与赫萝的女儿", "appearance": "续作《狼与羊皮纸》主角"},
+      {"id": "char_005", "name": "艾莉莎·修汀哈姆", "role": "重要配角", "occupation": "商人"},
+      {"id": "char_006", "name": "寇尔", "role": "罗伦斯的学徒", "development": "跟随罗伦斯学习经商"}
+    ],
+    "relationship_dynamics": {
+      "holo_lawrence": {
+        "id": "rel_001", "type": "恋人→夫妻", "progression": "缓慢但清晰的情感发展",
+        "key_moments": ["第1卷相遇", "旅途互相试探", "商业危机互助", "第5-9卷情感深化", "结局结婚", "续作育女"],
+        "quote": "咱如果喜欢上汝，汝可是会很麻烦的"
+      }
+    },
+    "character_network": {
+      "nodes": [
+        {"id": "char_001", "name": "克拉福·罗伦斯", "category": "主角"},
+        {"id": "char_002", "name": "赫萝", "category": "主角"},
+        {"id": "char_003", "name": "诺儿菈·艾伦", "category": "配角"},
+        {"id": "char_004", "name": "缪莉", "category": "续作主角"},
+        {"id": "char_005", "name": "艾莉莎·修汀哈姆", "category": "配角"},
+        {"id": "char_006", "name": "寇尔", "category": "配角"}
+      ],
+      "edges": [
+        {"source": "char_001", "target": "char_002", "relation": "恋人→夫妻", "strength": 5},
+        {"source": "char_001", "target": "char_003", "relation": "旅伴", "strength": 3},
+        {"source": "char_001", "target": "char_004", "relation": "父女", "strength": 5},
+        {"source": "char_002", "target": "char_003", "relation": "朋友", "strength": 3},
+        {"source": "char_002", "target": "char_004", "relation": "母女", "strength": 5},
+        {"source": "char_001", "target": "char_006", "relation": "师徒", "strength": 4}
+      ]
+    }
+  },
+
+  "dimension_3_worldview": {
+    "name": "世界观设定",
+    "description": "故事发生的地理、历史、宗教、社会背景",
+    "historical_background": {
+      "time_period": "12-13世纪欧洲",
+      "geographical_prototype": "波罗的海沿岸（普鲁士、利沃尼亚）",
+      "historical_events": [
+        {"id": "hist_001", "name": "北方十字军远征", "description": "条顿骑士团武力布教", "economic_impact": "商人大商机"},
+        {"id": "hist_002", "name": "神权衰落", "description": "教会权力走下坡，经济权力向君主转移"},
+        {"id": "hist_003", "name": "社会结构变迁", "changes": ["集中制取代分封制", "市民阶层出现", "农民向城市移民"]}
+      ]
+    },
+    "geography": {
+      "locations": [
+        {"id": "loc_001", "name": "帕斯罗村", "type": "村庄", "significance": "罗伦斯与赫萝相遇处"},
+        {"id": "loc_002", "name": "纽希拉", "type": "温泉城镇", "significance": "最终定居地"},
+        {"id": "loc_003", "name": "帕兹欧", "type": "商业港镇", "features": ["自治权", "大港口"]},
+        {"id": "loc_004", "name": "留宾海根", "type": "宗教都市", "ruler": "圣堂参事会"},
+        {"id": "loc_005", "name": "约伊兹", "type": "森林", "region": "北方", "significance": "赫萝故乡"},
+        {"id": "loc_006", "name": "崔尼王国", "type": "王国", "currency": "崔尼银币"},
+        {"id": "loc_007", "name": "普罗亚尼亚王国", "type": "王国", "religion_policy": "宗教宽容"}
+      ],
+      "regions": [
+        {"id": "reg_001", "name": "北方区域", "characteristics": ["终年积雪", "森林茂密", "异教徒信仰"]},
+        {"id": "reg_002", "name": "南方区域", "characteristics": ["商业发达", "城邦林立"]}
+      ]
+    },
+    "religion": {
+      "belief_systems": [
+        {"id": "rel_001", "name": "正教", "type": "一神教", "attitude": "视异教为异端", "punishment": "火刑"},
+        {"id": "rel_002", "name": "异教", "type": "多神教", "deities": ["赫萝(丰收/狼)", "其他荒野众神"], "status": "受压迫"}
+      ],
+      "religious_events": [{"id": "evt_001", "name": "北方大远征", "description": "每年深冬讨伐异教徒"}]
+    },
+    "social_structure": {
+      "classes": [
+        {"id": "cls_001", "name": "贵族", "status": "高", "power": "政治权力逐渐削弱"},
+        {"id": "cls_002", "name": "教会人员", "status": "高", "power": "神权逐渐衰落"},
+        {"id": "cls_003", "name": "商人", "status": "低→中", "rising_power": "经济权力增长"},
+        {"id": "cls_004", "name": "市民", "status": "中", "origin": "农民向城市移民"},
+        {"id": "cls_005", "name": "农民", "status": "低"}
+      ]
+    }
+  },
+
+  "dimension_4_philosophy": {
+    "name": "哲学思想",
+    "description": "作品探讨的深层主题和哲学思考",
+    "themes": [
+      {"id": "theme_001", "name": "孤独与陪伴", "description": "赫萝与罗伦斯从孤独到互相陪伴", "resolution": "在纽希拉找到归属"},
+      {"id": "theme_002", "name": "信仰与存在", "description": "神明存在依赖人类信仰", "question": "当被遗忘时，神是否还存在？"},
+      {"id": "theme_003", "name": "传统与现代的冲突", "description": "中世纪社会转型期旧秩序与新秩序碰撞"},
+      {"id": "theme_004", "name": "信任与背叛", "description": "商业交易建立在信任基础上"},
+      {"id": "theme_005", "name": "自由与束缚", "description": "旅行自由vs安定生活的选择"},
+      {"id": "theme_006", "name": "人与自然的和谐", "description": "赫萝象征自然力量与人类农业社会关系"},
+      {"id": "theme_007", "name": "身份与认同", "description": "角色对多重身份的探索与接纳"},
+      {"id": "theme_008", "name": "爱与成长", "description": "缓慢而真实的爱情成长过程"}
+    ],
+    "philosophical_quotes": [
+      {"id": "quote_001", "text": "咱如果喜欢上汝，汝可是会很麻烦的", "speaker": "赫萝", "theme": "爱与羁绊"},
+      {"id": "quote_002", "text": "所谓的货币啊，可说是建立在信赖度上", "speaker": "罗伦斯/赫萝", "theme": "信任与经济"},
+      {"id": "quote_003", "text": "虽然咱长久以来被尊为神，不过，咱就是咱，咱是赫萝", "speaker": "赫萝", "theme": "身份认同"}
+    ],
+    "cultural_significance": {
+      "educational_value": "经济学和恋爱观启蒙",
+      "literary_achievement": "2007年这本轻小说真厉害第一名",
+      "unique_position": "以经济学为核心的奇幻小说"
+    }
+  },
+
+  "knowledge_graph_summary": {
+    "total_concepts": 156,
+    "key_relationships": [
+      {"type": "经济", "count": 45, "key_nodes": ["货币体系", "贸易系统", "商业组织"]},
+      {"type": "角色", "count": 38, "key_nodes": ["罗伦斯", "赫萝", "诺儿菈"]},
+      {"type": "世界观", "count": 42, "key_nodes": ["地理", "宗教", "社会结构"]},
+      {"type": "哲学", "count": 31, "key_nodes": ["孤独与陪伴", "信仰与存在", "爱与成长"]}
+    ],
+    "core_narrative": "旅行商人罗伦斯与丰收之神赫萝的相遇、旅行、相爱与定居，在中世纪欧洲风格的世界中探索经济、信仰、爱情与人生的意义",
+    "unique_features": [
+      "以经济学为核心的奇幻小说",
+      "高度还原12-13世纪欧洲历史与经济体系",
+      "缓慢而真实的爱情发展",
+      "深厚的历史文化考据"
+    ]
+  }
+}
+JSONEOF; __hermes_rc=$?; printf '__HERMES_FENCE_a9f7b3__'; exit $__hermes_rc

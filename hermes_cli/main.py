@@ -785,6 +785,7 @@ def cmd_model(args):
         "openai-codex": "OpenAI Codex",
         "copilot-acp": "GitHub Copilot ACP",
         "copilot": "GitHub Copilot",
+        "llama-api": "Local llama-api",
         "anthropic": "Anthropic",
         "zai": "Z.AI / GLM",
         "kimi-coding": "Kimi / Moonshot",
@@ -794,8 +795,7 @@ def cmd_model(args):
         "opencode-go": "OpenCode Go",
         "ai-gateway": "AI Gateway",
         "kilocode": "Kilo Code",
-        "alibaba": "Alibaba Cloud (DashScope)",
-        "cpa": "CPA",
+        "bailian": "Bailian (DashScope)",
         "custom": "Custom endpoint",
     }
     active_label = provider_labels.get(active, active)
@@ -812,6 +812,7 @@ def cmd_model(args):
         ("openai-codex", "OpenAI Codex"),
         ("copilot-acp", "GitHub Copilot ACP (spawns `copilot --acp --stdio`)"),
         ("copilot", "GitHub Copilot (uses GITHUB_TOKEN or gh auth token)"),
+        ("llama-api", "Local llama-api (OpenAI-compatible local endpoint)"),
         ("anthropic", "Anthropic (Claude models — API key or Claude Code)"),
         ("zai", "Z.AI / GLM (Zhipu AI direct API)"),
         ("kimi-coding", "Kimi / Moonshot (Moonshot AI direct API)"),
@@ -821,8 +822,7 @@ def cmd_model(args):
         ("opencode-zen", "OpenCode Zen (35+ curated models, pay-as-you-go)"),
         ("opencode-go", "OpenCode Go (open models, $10/month subscription)"),
         ("ai-gateway", "AI Gateway (Vercel — 200+ models, pay-per-use)"),
-        ("alibaba", "Alibaba Cloud / DashScope (Qwen models, Anthropic-compatible)"),
-        ("cpa", "CPA (OpenAI-compatible router / local proxy)"),
+        ("bailian", "Bailian / DashScope (Qwen models, Anthropic-compatible)"),
     ]
 
     # Add user-defined custom providers from config.yaml
@@ -895,7 +895,7 @@ def cmd_model(args):
         _model_flow_anthropic(config, current_model)
     elif selected_provider == "kimi-coding":
         _model_flow_kimi(config, current_model)
-    elif selected_provider in ("zai", "minimax", "minimax-cn", "kilocode", "opencode-zen", "opencode-go", "ai-gateway", "alibaba", "cpa"):
+    elif selected_provider in ("llama-api", "zai", "minimax", "minimax-cn", "kilocode", "opencode-zen", "opencode-go", "ai-gateway", "bailian"):
         _model_flow_api_key_provider(config, selected_provider, current_model)
 
 
@@ -1496,6 +1496,7 @@ _PROVIDER_MODELS = {
         "gemini-2.5-pro",
         "grok-code-fast-1",
     ],
+    "llama-api": [],
     "zai": [
         "glm-5",
         "glm-4.7",
@@ -2021,7 +2022,7 @@ def _model_flow_api_key_provider(config, provider_id, current_model=""):
     pconfig = PROVIDER_REGISTRY[provider_id]
     key_env = pconfig.api_key_env_vars[0] if pconfig.api_key_env_vars else ""
     base_url_env = pconfig.base_url_env_var or ""
-    key_optional = provider_id == "cpa"
+    key_optional = provider_id == "llama-api"
 
     # Check / prompt for API key
     existing_key = ""
@@ -3149,7 +3150,7 @@ For more help on a command:
     )
     chat_parser.add_argument(
         "--provider",
-        choices=["auto", "openrouter", "nous", "openai-codex", "copilot-acp", "copilot", "anthropic", "zai", "kimi-coding", "minimax", "minimax-cn", "kilocode", "cpa"],
+        choices=["auto", "openrouter", "nous", "openai-codex", "copilot-acp", "copilot", "llama-api", "anthropic", "zai", "kimi-coding", "minimax", "minimax-cn", "kilocode", "bailian"],
         default=None,
         help="Inference provider (default: auto)"
     )

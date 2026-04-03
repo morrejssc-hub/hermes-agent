@@ -139,7 +139,8 @@ def _get_named_custom_provider(requested_provider: str) -> Optional[Dict[str, An
         except AuthError:
             pass
         else:
-            return None
+            if requested_norm != "local":
+                return None
 
     config = load_config()
     custom_providers = config.get("custom_providers")
@@ -395,15 +396,17 @@ def resolve_runtime_provider(
         base_url = creds.get("base_url", "").rstrip("/")
         api_key = creds.get("api_key", "")
         api_mode = "chat_completions"
+        configured_mode = _parse_api_mode(model_cfg.get("api_mode"))
         if provider == "copilot":
             api_mode = _copilot_runtime_api_mode(model_cfg, api_key)
+        elif provider == "llama-api":
+            api_mode = configured_mode or "chat_completions"
         else:
             # Check explicit api_mode from model config first
-            configured_mode = _parse_api_mode(model_cfg.get("api_mode"))
             if configured_mode:
                 api_mode = configured_mode
-            elif provider == "cpa":
-                api_mode = _detect_api_mode_for_url(base_url) or "chat_completions"
+            elif provider == "bailian":
+                api_mode = _detect_api_mode_for_url(base_url) or "anthropic_messages"
             # Auto-detect Anthropic-compatible endpoints by URL convention
             # (e.g. https://api.minimax.io/anthropic, https://dashscope.../anthropic)
             elif base_url.rstrip("/").endswith("/anthropic"):
@@ -414,13 +417,6 @@ def resolve_runtime_provider(
                 api_mode = "anthropic_messages"
                 if base_url.rstrip("/").endswith("/v1"):
                     base_url = base_url.rstrip("/")[:-3] + "/anthropic"
-        if provider == "cpa" and not api_key:
-            try:
-                from agent.model_metadata import is_local_endpoint
-            except Exception:
-                is_local_endpoint = None
-            if callable(is_local_endpoint) and is_local_endpoint(base_url):
-                api_key = "no-key-required"
         return {
             "provider": provider,
             "api_mode": api_mode,

@@ -201,6 +201,15 @@ class TelegramAdapter(BasePlatformAdapter):
         except Exception:
             pass
 
+        # Re-initialize the app if needed (handles cases where the app was
+        # partially shut down during network outage)
+        try:
+            if self._app and not self._app.running:
+                await self._app.initialize()
+                await self._app.start()
+        except Exception as init_err:
+            logger.warning("[%s] Failed to re-initialize Telegram app: %s", self.name, init_err)
+
         try:
             await self._app.updater.start_polling(
                 allowed_updates=Update.ALL_TYPES,
@@ -214,7 +223,18 @@ class TelegramAdapter(BasePlatformAdapter):
             self._polling_network_error_count = 0
         except Exception as retry_err:
             logger.warning("[%s] Telegram polling reconnect failed: %s", self.name, retry_err)
-            # The next network error will trigger another attempt.
+            # Continue retrying - schedule another attempt after delay
+            # This is critical for long network outages where start_polling
+            # may fail multiple times before connectivity is restored
+            asyncio.create_task(self._retry_network_error_later(retry_err))
+
+    async def _retry_network_error_later(self, last_error: Exception) -> None:
+        """Schedule a delayed retry for network error recovery."""
+        if self.has_fatal_error:
+            return
+        await asyncio.sleep(10)  # Wait before next attempt
+        if not self.has_fatal_error:
+            await self._handle_polling_network_error(last_error)
 
     async def _handle_polling_conflict(self, error: Exception) -> None:
         if self.has_fatal_error and self.fatal_error_code == "telegram_polling_conflict":

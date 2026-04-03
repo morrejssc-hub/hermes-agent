@@ -156,21 +156,21 @@ PROVIDER_REGISTRY: Dict[str, ProviderConfig] = {
         inference_base_url="https://api.anthropic.com",
         api_key_env_vars=("ANTHROPIC_API_KEY", "ANTHROPIC_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN"),
     ),
-    "alibaba": ProviderConfig(
-        id="alibaba",
-        name="Alibaba Cloud (DashScope)",
+    "bailian": ProviderConfig(
+        id="bailian",
+        name="Bailian (DashScope)",
         auth_type="api_key",
         inference_base_url="https://dashscope-intl.aliyuncs.com/apps/anthropic",
         api_key_env_vars=("DASHSCOPE_API_KEY",),
         base_url_env_var="DASHSCOPE_BASE_URL",
     ),
-    "cpa": ProviderConfig(
-        id="cpa",
-        name="CPA",
+    "llama-api": ProviderConfig(
+        id="llama-api",
+        name="Local llama-api",
         auth_type="api_key",
-        inference_base_url="http://127.0.0.1:8317/v1",
-        api_key_env_vars=("CPA_API_KEY",),
-        base_url_env_var="CPA_BASE_URL",
+        inference_base_url="http://localhost:8002/v1",
+        api_key_env_vars=("LLAMA_API_KEY",),
+        base_url_env_var="LLAMA_API_BASE_URL",
     ),
     "minimax-cn": ProviderConfig(
         id="minimax-cn",
@@ -232,6 +232,20 @@ PROVIDER_REGISTRY: Dict[str, ProviderConfig] = {
 # api.moonshot.ai/v1 (the default).  Auto-detect when user hasn't set
 # KIMI_BASE_URL explicitly.
 KIMI_CODE_BASE_URL = "https://api.kimi.com/coding/v1"
+
+
+def _normalize_llama_api_base_url(base_url: str) -> str:
+    """Normalize llama-api URLs to the OpenAI-compatible /v1 root."""
+    normalized = (base_url or "").strip().rstrip("/")
+    if not normalized:
+        return normalized
+    for suffix in ("/chat/completions", "/models"):
+        if normalized.endswith(suffix):
+            normalized = normalized[: -len(suffix)].rstrip("/")
+            break
+    if normalized.endswith("/v1"):
+        return normalized
+    return normalized + "/v1"
 
 
 def _resolve_kimi_base_url(api_key: str, default_url: str, env_override: str) -> str:
@@ -687,6 +701,7 @@ def resolve_provider(
         "glm": "zai", "z-ai": "zai", "z.ai": "zai", "zhipu": "zai",
         "kimi": "kimi-coding", "moonshot": "kimi-coding",
         "minimax-china": "minimax-cn", "minimax_cn": "minimax-cn",
+        "llamaapi": "llama-api", "llama_api": "llama-api", "local": "llama-api",
         "claude": "anthropic", "claude-code": "anthropic",
         "github": "copilot", "github-copilot": "copilot",
         "github-models": "copilot", "github-model": "copilot",
@@ -695,7 +710,10 @@ def resolve_provider(
         "opencode": "opencode-zen", "zen": "opencode-zen",
         "go": "opencode-go", "opencode-go-sub": "opencode-go",
         "kilo": "kilocode", "kilo-code": "kilocode", "kilo-gateway": "kilocode",
-        "cli-proxy-api": "cpa", "proxy-api": "cpa",
+        "dashscope": "bailian", "aliyun": "bailian", "qwen": "bailian",
+        "alibaba": "bailian", "alibaba-cloud": "bailian",
+        "bailian-api": "bailian",
+        "cpa": "bailian", "cli-proxy-api": "bailian", "proxy-api": "bailian",
     }
     normalized = _PROVIDER_ALIASES.get(normalized, normalized)
 
@@ -728,6 +746,9 @@ def resolve_provider(
 
     if has_usable_secret(os.getenv("OPENAI_API_KEY")) or has_usable_secret(os.getenv("OPENROUTER_API_KEY")):
         return "openrouter"
+
+    if os.getenv("LLAMA_API_BASE_URL", "").strip():
+        return "llama-api"
 
     # Auto-detect API-key providers by checking their env vars
     for pid, pconfig in PROVIDER_REGISTRY.items():
@@ -1614,10 +1635,23 @@ def get_api_key_provider_status(provider_id: str) -> Dict[str, Any]:
 
     if provider_id == "kimi-coding":
         base_url = _resolve_kimi_base_url(api_key, pconfig.inference_base_url, env_url)
+    elif provider_id == "llama-api":
+        base_url = _normalize_llama_api_base_url(env_url or pconfig.inference_base_url)
     elif env_url:
         base_url = env_url
     else:
         base_url = pconfig.inference_base_url
+
+    if provider_id == "llama-api":
+        configured = bool(base_url)
+        return {
+            "configured": configured,
+            "provider": provider_id,
+            "name": pconfig.name,
+            "key_source": key_source or ("none-required" if configured else ""),
+            "base_url": base_url,
+            "logged_in": configured,
+        }
 
     return {
         "configured": bool(api_key),
@@ -1698,10 +1732,16 @@ def resolve_api_key_provider_credentials(provider_id: str) -> Dict[str, Any]:
 
     if provider_id == "kimi-coding":
         base_url = _resolve_kimi_base_url(api_key, pconfig.inference_base_url, env_url)
+    elif provider_id == "llama-api":
+        base_url = _normalize_llama_api_base_url(env_url or pconfig.inference_base_url)
     elif env_url:
         base_url = env_url.rstrip("/")
     else:
         base_url = pconfig.inference_base_url
+
+    if provider_id == "llama-api" and not api_key:
+        api_key = "no-key-required"
+        key_source = "none-required"
 
     return {
         "provider": provider_id,

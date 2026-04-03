@@ -1,4 +1,4 @@
-"""Tests for API-key provider support (z.ai/GLM, Kimi, MiniMax, AI Gateway)."""
+"""Tests for API-key provider support (z.ai/GLM, Kimi, MiniMax, AI Gateway, llama-api)."""
 
 import os
 import sys
@@ -38,13 +38,14 @@ class TestProviderRegistry:
     @pytest.mark.parametrize("provider_id,name,auth_type", [
         ("copilot-acp", "GitHub Copilot ACP", "external_process"),
         ("copilot", "GitHub Copilot", "api_key"),
+        ("llama-api", "Local llama-api", "api_key"),
         ("zai", "Z.AI / GLM", "api_key"),
         ("kimi-coding", "Kimi / Moonshot", "api_key"),
         ("minimax", "MiniMax", "api_key"),
         ("minimax-cn", "MiniMax (China)", "api_key"),
         ("ai-gateway", "AI Gateway", "api_key"),
         ("kilocode", "Kilo Code", "api_key"),
-        ("cpa", "CPA", "api_key"),
+        ("bailian", "Bailian (DashScope)", "api_key"),
     ])
     def test_provider_registered(self, provider_id, name, auth_type):
         assert provider_id in PROVIDER_REGISTRY
@@ -68,6 +69,11 @@ class TestProviderRegistry:
         assert pconfig.api_key_env_vars == ("KIMI_API_KEY",)
         assert pconfig.base_url_env_var == "KIMI_BASE_URL"
 
+    def test_llama_api_env_vars(self):
+        pconfig = PROVIDER_REGISTRY["llama-api"]
+        assert pconfig.api_key_env_vars == ("LLAMA_API_KEY",)
+        assert pconfig.base_url_env_var == "LLAMA_API_BASE_URL"
+
     def test_minimax_env_vars(self):
         pconfig = PROVIDER_REGISTRY["minimax"]
         assert pconfig.api_key_env_vars == ("MINIMAX_API_KEY",)
@@ -88,21 +94,22 @@ class TestProviderRegistry:
         assert pconfig.api_key_env_vars == ("KILOCODE_API_KEY",)
         assert pconfig.base_url_env_var == "KILOCODE_BASE_URL"
 
-    def test_cpa_env_vars(self):
-        pconfig = PROVIDER_REGISTRY["cpa"]
-        assert pconfig.api_key_env_vars == ("CPA_API_KEY",)
-        assert pconfig.base_url_env_var == "CPA_BASE_URL"
+    def test_bailian_env_vars(self):
+        pconfig = PROVIDER_REGISTRY["bailian"]
+        assert pconfig.api_key_env_vars == ("DASHSCOPE_API_KEY",)
+        assert pconfig.base_url_env_var == "DASHSCOPE_BASE_URL"
 
     def test_base_urls(self):
         assert PROVIDER_REGISTRY["copilot"].inference_base_url == "https://api.githubcopilot.com"
         assert PROVIDER_REGISTRY["copilot-acp"].inference_base_url == "acp://copilot"
+        assert PROVIDER_REGISTRY["llama-api"].inference_base_url == "http://localhost:8002/v1"
         assert PROVIDER_REGISTRY["zai"].inference_base_url == "https://api.z.ai/api/paas/v4"
         assert PROVIDER_REGISTRY["kimi-coding"].inference_base_url == "https://api.moonshot.ai/v1"
         assert PROVIDER_REGISTRY["minimax"].inference_base_url == "https://api.minimax.io/anthropic"
         assert PROVIDER_REGISTRY["minimax-cn"].inference_base_url == "https://api.minimaxi.com/anthropic"
         assert PROVIDER_REGISTRY["ai-gateway"].inference_base_url == "https://ai-gateway.vercel.sh/v1"
         assert PROVIDER_REGISTRY["kilocode"].inference_base_url == "https://api.kilo.ai/api/gateway"
-        assert PROVIDER_REGISTRY["cpa"].inference_base_url == "http://127.0.0.1:8317/v1"
+        assert PROVIDER_REGISTRY["bailian"].inference_base_url == "https://dashscope-intl.aliyuncs.com/apps/anthropic"
 
     def test_oauth_providers_unchanged(self):
         """Ensure we didn't break the existing OAuth providers."""
@@ -123,11 +130,11 @@ PROVIDER_ENV_VARS = (
     "KIMI_API_KEY", "KIMI_BASE_URL", "MINIMAX_API_KEY", "MINIMAX_CN_API_KEY",
     "AI_GATEWAY_API_KEY", "AI_GATEWAY_BASE_URL",
     "KILOCODE_API_KEY", "KILOCODE_BASE_URL",
-    "CPA_API_KEY", "CPA_BASE_URL",
-    "DASHSCOPE_API_KEY", "OPENCODE_ZEN_API_KEY", "OPENCODE_GO_API_KEY",
+    "DASHSCOPE_API_KEY", "DASHSCOPE_BASE_URL", "OPENCODE_ZEN_API_KEY", "OPENCODE_GO_API_KEY",
     "NOUS_API_KEY", "GITHUB_TOKEN", "GH_TOKEN",
     "OPENAI_BASE_URL", "HERMES_COPILOT_ACP_COMMAND", "COPILOT_CLI_PATH",
     "HERMES_COPILOT_ACP_ARGS", "COPILOT_ACP_BASE_URL",
+    "LLAMA_API_KEY", "LLAMA_API_BASE_URL",
 )
 
 
@@ -156,8 +163,14 @@ class TestResolveProvider:
     def test_explicit_ai_gateway(self):
         assert resolve_provider("ai-gateway") == "ai-gateway"
 
-    def test_explicit_cpa(self):
-        assert resolve_provider("cpa") == "cpa"
+    def test_explicit_bailian(self):
+        assert resolve_provider("bailian") == "bailian"
+
+    def test_explicit_llama_api(self):
+        assert resolve_provider("llama-api") == "llama-api"
+
+    def test_alias_local_maps_to_llama_api(self):
+        assert resolve_provider("local") == "llama-api"
 
     def test_alias_glm(self):
         assert resolve_provider("glm") == "zai"
@@ -195,8 +208,10 @@ class TestResolveProvider:
     def test_alias_kilo_gateway(self):
         assert resolve_provider("kilo-gateway") == "kilocode"
 
-    def test_alias_cli_proxy_api(self):
-        assert resolve_provider("cli-proxy-api") == "cpa"
+    def test_alias_legacy_cpa_routes_to_bailian(self):
+        assert resolve_provider("cpa") == "bailian"
+        assert resolve_provider("cli-proxy-api") == "bailian"
+        assert resolve_provider("alibaba") == "bailian"
 
     def test_alias_case_insensitive(self):
         assert resolve_provider("GLM") == "zai"
@@ -244,6 +259,10 @@ class TestResolveProvider:
     def test_auto_detects_ai_gateway_key(self, monkeypatch):
         monkeypatch.setenv("AI_GATEWAY_API_KEY", "test-gw-key")
         assert resolve_provider("auto") == "ai-gateway"
+
+    def test_auto_detects_llama_api_base_url(self, monkeypatch):
+        monkeypatch.setenv("LLAMA_API_BASE_URL", "http://localhost:8002")
+        assert resolve_provider("auto") == "llama-api"
 
     def test_auto_detects_kilocode_key(self, monkeypatch):
         monkeypatch.setenv("KILOCODE_API_KEY", "test-kilo-key")
@@ -331,6 +350,13 @@ class TestApiKeyProviderStatus:
         status = get_api_key_provider_status("nous")
         assert status["configured"] is False
 
+    def test_llama_api_status_without_key(self):
+        status = get_api_key_provider_status("llama-api")
+        assert status["configured"] is True
+        assert status["logged_in"] is True
+        assert status["key_source"] == "none-required"
+        assert status["base_url"] == "http://localhost:8002/v1"
+
 
 # =============================================================================
 # Credential Resolution tests
@@ -408,6 +434,23 @@ class TestResolveApiKeyProviderCredentials:
         assert creds["api_key"] == "kimi-secret-key"
         assert creds["base_url"] == "https://api.moonshot.ai/v1"
 
+    def test_resolve_llama_api_without_key(self):
+        creds = resolve_api_key_provider_credentials("llama-api")
+        assert creds["provider"] == "llama-api"
+        assert creds["api_key"] == "no-key-required"
+        assert creds["base_url"] == "http://localhost:8002/v1"
+        assert creds["source"] == "none-required"
+
+    def test_resolve_llama_api_with_custom_base_url(self, monkeypatch):
+        monkeypatch.setenv("LLAMA_API_BASE_URL", "http://127.0.0.1:9000")
+        creds = resolve_api_key_provider_credentials("llama-api")
+        assert creds["base_url"] == "http://127.0.0.1:9000/v1"
+
+    def test_resolve_llama_api_with_chat_completion_url(self, monkeypatch):
+        monkeypatch.setenv("LLAMA_API_BASE_URL", "http://127.0.0.1:9000/v1/chat/completions")
+        creds = resolve_api_key_provider_credentials("llama-api")
+        assert creds["base_url"] == "http://127.0.0.1:9000/v1"
+
     def test_resolve_minimax_with_key(self, monkeypatch):
         monkeypatch.setenv("MINIMAX_API_KEY", "mm-secret-key")
         creds = resolve_api_key_provider_credentials("minimax")
@@ -442,12 +485,13 @@ class TestResolveApiKeyProviderCredentials:
         creds = resolve_api_key_provider_credentials("kilocode")
         assert creds["base_url"] == "https://custom.kilo.example/v1"
 
-    def test_resolve_cpa_without_key_uses_base_url(self, monkeypatch):
-        monkeypatch.setenv("CPA_BASE_URL", "http://127.0.0.1:8317/v1")
-        creds = resolve_api_key_provider_credentials("cpa")
-        assert creds["provider"] == "cpa"
-        assert creds["api_key"] == ""
-        assert creds["base_url"] == "http://127.0.0.1:8317/v1"
+    def test_resolve_bailian_with_key_uses_base_url(self, monkeypatch):
+        monkeypatch.setenv("DASHSCOPE_API_KEY", "dashscope-key")
+        monkeypatch.setenv("DASHSCOPE_BASE_URL", "https://coding.dashscope.aliyuncs.com/apps/anthropic")
+        creds = resolve_api_key_provider_credentials("bailian")
+        assert creds["provider"] == "bailian"
+        assert creds["api_key"] == "dashscope-key"
+        assert creds["base_url"] == "https://coding.dashscope.aliyuncs.com/apps/anthropic"
 
     def test_resolve_with_custom_base_url(self, monkeypatch):
         monkeypatch.setenv("GLM_API_KEY", "glm-key")
@@ -519,6 +563,14 @@ class TestRuntimeProviderResolution:
         assert result["api_key"] == "gw-key"
         assert "ai-gateway.vercel.sh" in result["base_url"]
 
+    def test_runtime_llama_api(self):
+        from hermes_cli.runtime_provider import resolve_runtime_provider
+        result = resolve_runtime_provider(requested="llama-api")
+        assert result["provider"] == "llama-api"
+        assert result["api_mode"] == "chat_completions"
+        assert result["api_key"] == "no-key-required"
+        assert result["base_url"] == "http://localhost:8002/v1"
+
     def test_runtime_kilocode(self, monkeypatch):
         monkeypatch.setenv("KILOCODE_API_KEY", "kilo-key")
         from hermes_cli.runtime_provider import resolve_runtime_provider
@@ -528,14 +580,15 @@ class TestRuntimeProviderResolution:
         assert result["api_key"] == "kilo-key"
         assert "kilo.ai" in result["base_url"]
 
-    def test_runtime_cpa_local_without_key_uses_placeholder(self, monkeypatch):
-        monkeypatch.setenv("CPA_BASE_URL", "http://127.0.0.1:8317/v1")
+    def test_runtime_bailian_uses_anthropic_mode(self, monkeypatch):
+        monkeypatch.setenv("DASHSCOPE_API_KEY", "dashscope-key")
+        monkeypatch.setenv("DASHSCOPE_BASE_URL", "https://coding.dashscope.aliyuncs.com/apps/anthropic")
         from hermes_cli.runtime_provider import resolve_runtime_provider
-        result = resolve_runtime_provider(requested="cpa")
-        assert result["provider"] == "cpa"
-        assert result["api_mode"] == "chat_completions"
-        assert result["api_key"] == "no-key-required"
-        assert result["base_url"] == "http://127.0.0.1:8317/v1"
+        result = resolve_runtime_provider(requested="bailian")
+        assert result["provider"] == "bailian"
+        assert result["api_mode"] == "anthropic_messages"
+        assert result["api_key"] == "dashscope-key"
+        assert result["base_url"] == "https://coding.dashscope.aliyuncs.com/apps/anthropic"
 
     def test_runtime_auto_detects_api_key_provider(self, monkeypatch):
         monkeypatch.setenv("KIMI_API_KEY", "auto-kimi-key")

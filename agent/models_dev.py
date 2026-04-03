@@ -35,7 +35,7 @@ PROVIDER_TO_MODELS_DEV: Dict[str, str] = {
     "minimax": "minimax",
     "minimax-cn": "minimax-cn",
     "deepseek": "deepseek",
-    "alibaba": "alibaba",
+    "bailian": "alibaba",
     "copilot": "github-copilot",
     "ai-gateway": "vercel",
     "opencode-zen": "opencode",

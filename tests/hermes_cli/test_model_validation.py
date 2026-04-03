@@ -66,10 +66,15 @@ class TestParseModelInput:
         assert provider == "openrouter"
         assert model == "gpt-5.4"
 
-    def test_cpa_provider_switch(self):
-        provider, model = parse_model_input("cpa:glm-5", "openrouter")
-        assert provider == "cpa"
-        assert model == "glm-5"
+    def test_bailian_provider_switch(self):
+        provider, model = parse_model_input("bailian:qwen3.5-plus", "openrouter")
+        assert provider == "bailian"
+        assert model == "qwen3.5-plus"
+
+    def test_legacy_cpa_provider_switch_maps_to_bailian(self):
+        provider, model = parse_model_input("cpa:qwen3.5-plus", "openrouter")
+        assert provider == "bailian"
+        assert model == "qwen3.5-plus"
 
     def test_nous_provider_switch(self):
         provider, model = parse_model_input("nous:hermes-3", "openrouter")

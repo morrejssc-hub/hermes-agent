@@ -275,6 +275,18 @@ def test_named_custom_provider_uses_saved_credentials(monkeypatch):
     assert resolved["source"] == "custom_provider:Local"
 
 
+def test_local_provider_without_named_custom_resolves_to_llama_api(monkeypatch):
+    monkeypatch.setattr(rp, "load_config", lambda: {})
+
+    resolved = rp.resolve_runtime_provider(requested="local")
+
+    assert resolved["provider"] == "llama-api"
+    assert resolved["api_mode"] == "chat_completions"
+    assert resolved["base_url"] == "http://localhost:8002/v1"
+    assert resolved["api_key"] == "no-key-required"
+    assert resolved["requested_provider"] == "local"
+
+
 def test_named_custom_provider_falls_back_to_openai_api_key(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "env-openai-key")
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
@@ -552,46 +564,46 @@ def test_minimax_explicit_api_mode_respected(monkeypatch):
     assert resolved["api_mode"] == "chat_completions"
 
 
-def test_alibaba_default_anthropic_endpoint_uses_anthropic_messages(monkeypatch):
-    """Alibaba with default /apps/anthropic URL should use anthropic_messages mode."""
-    monkeypatch.setattr(rp, "resolve_provider", lambda *a, **k: "alibaba")
+def test_bailian_default_anthropic_endpoint_uses_anthropic_messages(monkeypatch):
+    """Bailian with default /apps/anthropic URL should use anthropic_messages mode."""
+    monkeypatch.setattr(rp, "resolve_provider", lambda *a, **k: "bailian")
     monkeypatch.setattr(rp, "_get_model_config", lambda: {})
     monkeypatch.setenv("DASHSCOPE_API_KEY", "test-dashscope-key")
     monkeypatch.delenv("DASHSCOPE_BASE_URL", raising=False)
 
-    resolved = rp.resolve_runtime_provider(requested="alibaba")
+    resolved = rp.resolve_runtime_provider(requested="bailian")
 
-    assert resolved["provider"] == "alibaba"
+    assert resolved["provider"] == "bailian"
     assert resolved["api_mode"] == "anthropic_messages"
     assert resolved["base_url"] == "https://dashscope-intl.aliyuncs.com/apps/anthropic"
 
 
-def test_alibaba_openai_compatible_v1_endpoint_stays_chat_completions(monkeypatch):
-    """Alibaba with /v1 coding endpoint should use chat_completions mode."""
-    monkeypatch.setattr(rp, "resolve_provider", lambda *a, **k: "alibaba")
+def test_bailian_openai_compatible_v1_endpoint_stays_chat_completions(monkeypatch):
+    """Bailian with /v1 coding endpoint should use chat_completions mode."""
+    monkeypatch.setattr(rp, "resolve_provider", lambda *a, **k: "bailian")
     monkeypatch.setattr(rp, "_get_model_config", lambda: {})
     monkeypatch.setenv("DASHSCOPE_API_KEY", "test-dashscope-key")
     monkeypatch.setenv("DASHSCOPE_BASE_URL", "https://coding-intl.dashscope.aliyuncs.com/v1")
 
-    resolved = rp.resolve_runtime_provider(requested="alibaba")
+    resolved = rp.resolve_runtime_provider(requested="bailian")
 
-    assert resolved["provider"] == "alibaba"
+    assert resolved["provider"] == "bailian"
     assert resolved["api_mode"] == "chat_completions"
     assert resolved["base_url"] == "https://coding-intl.dashscope.aliyuncs.com/v1"
 
 
-def test_cpa_local_v1_endpoint_uses_chat_completions_and_placeholder_key(monkeypatch):
-    monkeypatch.setattr(rp, "resolve_provider", lambda *a, **k: "cpa")
+def test_bailian_anthropic_endpoint_uses_messages_api(monkeypatch):
+    monkeypatch.setattr(rp, "resolve_provider", lambda *a, **k: "bailian")
     monkeypatch.setattr(rp, "_get_model_config", lambda: {})
-    monkeypatch.delenv("CPA_API_KEY", raising=False)
-    monkeypatch.setenv("CPA_BASE_URL", "http://127.0.0.1:8317/v1")
+    monkeypatch.setenv("DASHSCOPE_API_KEY", "test-dashscope-key")
+    monkeypatch.setenv("DASHSCOPE_BASE_URL", "https://coding.dashscope.aliyuncs.com/apps/anthropic")
 
-    resolved = rp.resolve_runtime_provider(requested="cpa")
+    resolved = rp.resolve_runtime_provider(requested="bailian")
 
-    assert resolved["provider"] == "cpa"
-    assert resolved["api_mode"] == "chat_completions"
-    assert resolved["base_url"] == "http://127.0.0.1:8317/v1"
-    assert resolved["api_key"] == "no-key-required"
+    assert resolved["provider"] == "bailian"
+    assert resolved["api_mode"] == "anthropic_messages"
+    assert resolved["base_url"] == "https://coding.dashscope.aliyuncs.com/apps/anthropic"
+    assert resolved["api_key"] == "test-dashscope-key"
 
 
 def test_named_custom_provider_anthropic_api_mode(monkeypatch):

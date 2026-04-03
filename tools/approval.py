@@ -10,6 +10,7 @@ This module is the single source of truth for the dangerous command system:
 
 import logging
 import os
+import queue
 import re
 import sys
 import threading
@@ -104,12 +105,27 @@ _lock = threading.Lock()
 _pending: dict[str, dict] = {}
 _session_approved: dict[str, set] = {}
 _permanent_approved: set = set()
+_pending_listener = None
+
+
+def set_pending_listener(cb):
+    """Register a callback invoked when a pending approval is submitted."""
+    global _pending_listener
+    _pending_listener = cb
 
 
 def submit_pending(session_key: str, approval: dict):
     """Store a pending approval request for a session."""
+    async_task_id = os.getenv("HERMES_ASYNC_TASK_ID", "").strip()
+    if async_task_id and "async_task_id" not in approval:
+        approval = {**approval, "async_task_id": async_task_id}
     with _lock:
         _pending[session_key] = approval
+    if _pending_listener is not None:
+        try:
+            _pending_listener(session_key, approval)
+        except Exception:
+            logger.debug("Pending approval listener failed", exc_info=True)
 
 
 def pop_pending(session_key: str) -> Optional[dict]:
@@ -545,12 +561,45 @@ def check_all_command_guards(command: str, env_type: str,
     # Gateway/async: single approval_required with combined description
     # Store all pattern keys so gateway replay approves all of them
     if is_gateway or is_ask:
-        submit_pending(session_key, {
+        pending = {
             "command": command,
             "pattern_key": primary_key,        # backward compat
             "pattern_keys": all_keys,           # all keys for replay
             "description": combined_desc,
-        })
+        }
+        wait_async = os.getenv("HERMES_ASYNC_APPROVAL_MODE", "").strip().lower() == "wait"
+        if wait_async:
+            response_queue = queue.Queue(maxsize=1)
+            pending["response_queue"] = response_queue
+        submit_pending(session_key, pending)
+        if wait_async:
+            try:
+                choice = response_queue.get(timeout=300)
+            except queue.Empty:
+                return {
+                    "approved": False,
+                    "message": "BLOCKED: Approval timed out after 5 minutes. Do NOT retry automatically.",
+                    "pattern_key": primary_key,
+                    "description": combined_desc,
+                }
+
+            if choice == "deny":
+                return {
+                    "approved": False,
+                    "message": "BLOCKED: User denied. Do NOT retry.",
+                    "pattern_key": primary_key,
+                    "description": combined_desc,
+                }
+
+            for key, _, is_tirith in warnings:
+                if choice == "session" or (choice == "always" and is_tirith):
+                    approve_session(session_key, key)
+                elif choice == "always":
+                    approve_session(session_key, key)
+                    approve_permanent(key)
+                    save_permanent_allowlist(_permanent_approved)
+
+            return {"approved": True, "message": None}
         return {
             "approved": False,
             "pattern_key": primary_key,

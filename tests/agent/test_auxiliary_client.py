@@ -942,14 +942,15 @@ class TestTaskSpecificOverrides:
             client, model = get_text_auxiliary_client("compression")
         assert model == "google/gemini-3-flash-preview"  # auto → OpenRouter
 
-    def test_cpa_provider_uses_main_model_by_default(self, monkeypatch):
-        monkeypatch.setenv("CPA_BASE_URL", "http://127.0.0.1:8317/v1")
-        monkeypatch.setenv("OPENAI_MODEL", "glm-5")
+    def test_bailian_provider_uses_main_model_by_default(self, monkeypatch):
+        monkeypatch.setenv("DASHSCOPE_API_KEY", "dashscope-key")
+        monkeypatch.setenv("DASHSCOPE_BASE_URL", "https://coding.dashscope.aliyuncs.com/apps/anthropic")
+        monkeypatch.setenv("OPENAI_MODEL", "qwen3.5-plus")
         with patch("agent.auxiliary_client.OpenAI") as mock_openai:
-            client, model = resolve_provider_client("cpa")
-        assert model == "glm-5"
-        assert mock_openai.call_args.kwargs["base_url"] == "http://127.0.0.1:8317/v1"
-        assert mock_openai.call_args.kwargs["api_key"] == "no-key-required"
+            client, model = resolve_provider_client("bailian")
+        assert model == "qwen3.5-plus"
+        assert mock_openai.call_args.kwargs["base_url"] == "https://coding.dashscope.aliyuncs.com/apps/anthropic"
+        assert mock_openai.call_args.kwargs["api_key"] == "dashscope-key"
 
     def test_compression_summary_base_url_from_config(self, monkeypatch, tmp_path):
         """compression.summary_base_url should produce a custom-endpoint client."""

@@ -401,6 +401,18 @@ class GatewayRunner:
 
         # Per-chat voice reply mode: "off" | "voice_only" | "all"
         self._voice_mode: Dict[str, str] = self._load_voice_modes()
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+
+        try:
+            from tools.approval import set_pending_listener
+            set_pending_listener(self._on_pending_approval_submitted)
+        except Exception:
+            logger.debug("Could not register approval pending listener", exc_info=True)
+        try:
+            from tools.delegate_tool import set_completion_listener
+            set_completion_listener(self._on_async_delegate_completed)
+        except Exception:
+            logger.debug("Could not register async delegate completion listener", exc_info=True)
 
     def _get_or_create_gateway_honcho(self, session_key: str):
         """Return a persistent Honcho manager/config pair for this gateway session."""
@@ -933,6 +945,7 @@ class GatewayRunner:
         """
         logger.info("Starting Hermes Gateway...")
         logger.info("Session storage: %s", self.config.sessions_dir)
+        self._loop = asyncio.get_running_loop()
         try:
             from gateway.status import write_runtime_status
             write_runtime_status(gateway_state="starting", exit_reason=None)
@@ -1931,9 +1944,11 @@ class GatewayRunner:
                             f"Use /resume to browse and restore a previous session.\n"
                             f"Adjust reset timing in config.yaml under session_reset."
                         )
+                        # Build metadata from source for thread support
+                        _notify_metadata = {"thread_id": source.thread_id} if source.thread_id else None
                         await adapter.send(
                             source.chat_id, notice,
-                            metadata=getattr(event, 'metadata', None),
+                            metadata=_notify_metadata,
                         )
             except Exception as e:
                 logger.debug("Auto-reset notification failed (non-fatal): %s", e)
@@ -4270,6 +4285,113 @@ class GatewayRunner:
 
     _APPROVAL_TIMEOUT_SECONDS = 300  # 5 minutes
 
+    def _on_pending_approval_submitted(self, session_key: str, approval: Dict[str, Any]) -> None:
+        """Bridge async/background approval requests into gateway session state."""
+        self._pending_approvals[session_key] = {
+            **approval,
+            "timestamp": time.time(),
+        }
+
+        loop = self._loop
+        if loop is None:
+            return
+
+        try:
+            asyncio.run_coroutine_threadsafe(
+                self._notify_pending_approval(session_key, approval),
+                loop,
+            )
+        except Exception:
+            logger.debug("Could not schedule pending approval notification", exc_info=True)
+
+    def _on_async_delegate_completed(
+        self,
+        *,
+        async_task_id: str,
+        parent_session_id: Optional[str],
+        parent_session_key: Optional[str],
+        note: str,
+    ) -> None:
+        """Wake the parent session so the main agent can style and deliver the result."""
+        if not parent_session_key:
+            return
+        loop = self._loop
+        if loop is None:
+            return
+        try:
+            asyncio.run_coroutine_threadsafe(
+                self._wake_main_agent_for_async_result(parent_session_key, async_task_id),
+                loop,
+            )
+        except Exception:
+            logger.debug("Could not schedule async delegate completion wake-up", exc_info=True)
+
+    async def _wake_main_agent_for_async_result(self, session_key: str, async_task_id: str) -> None:
+        entry = self.session_store._entries.get(session_key)
+        if not entry or not entry.origin:
+            return
+
+        source = entry.origin
+        adapter = self.adapters.get(source.platform)
+        if not adapter:
+            return
+
+        from gateway.platforms.base import MessageEvent, MessageType
+
+        event = MessageEvent(
+            text=(
+                f"后台任务 {async_task_id} 已完成。请读取最新的 system note，"
+                "向用户汇报关键结果，不要重新执行任务。"
+            ),
+            message_type=MessageType.TEXT,
+            source=source,
+            message_id=None,
+        )
+
+        if session_key in getattr(adapter, "_active_sessions", {}):
+            adapter._pending_messages[session_key] = event
+            logger.info("Queued async completion wake-up for busy session %s", session_key)
+            return
+
+        task = asyncio.create_task(adapter._process_message_background(event, session_key))
+        if hasattr(adapter, "_background_tasks"):
+            try:
+                adapter._background_tasks.add(task)
+                task.add_done_callback(adapter._background_tasks.discard)
+            except Exception:
+                pass
+        logger.info("Started async completion wake-up for session %s", session_key)
+
+    async def _notify_pending_approval(self, session_key: str, approval: Dict[str, Any]) -> None:
+        """Send a Telegram/platform notification for a pending approval."""
+        entry = self.session_store._entries.get(session_key)
+        if not entry or not entry.origin:
+            return
+
+        source = entry.origin
+        adapter = self.adapters.get(source.platform)
+        if not adapter:
+            return
+
+        cmd_preview = approval.get("command", "")
+        if len(cmd_preview) > 200:
+            cmd_preview = cmd_preview[:200] + "..."
+        task_hint = approval.get("async_task_id")
+        prefix = f"[Subtask {task_hint}] " if task_hint else ""
+        msg = (
+            f"{prefix}Dangerous command requires approval:\n"
+            f"```\n{cmd_preview}\n```\n"
+            "Reply `/approve` to execute, `/approve session` to approve this pattern for the session, or `/deny` to cancel."
+        )
+        try:
+            await adapter.send(
+                source.chat_id,
+                msg,
+                metadata={"thread_id": source.thread_id} if source.thread_id else None,
+            )
+        except Exception as e:
+            logger.warning("Failed to send approval notification for %s: %s", session_key, e)
+
     async def _handle_approve_command(self, event: MessageEvent) -> str:
         """Handle /approve command — execute a pending dangerous command.
 
@@ -4299,16 +4421,20 @@ class GatewayRunner:
         if not pattern_keys:
             pk = approval.get("pattern_key", "")
             pattern_keys = [pk] if pk else []
+        response_queue = approval.get("response_queue")
 
         # Determine approval scope from args
         args = event.get_command_args().strip().lower()
         from tools.approval import approve_session, approve_permanent
 
+        choice = "once"
         if args in ("always", "permanent", "permanently"):
+            choice = "always"
             for pk in pattern_keys:
                 approve_permanent(pk)
             scope_msg = " (pattern approved permanently)"
         elif args in ("session", "ses"):
+            choice = "session"
             for pk in pattern_keys:
                 approve_session(session_key, pk)
             scope_msg = " (pattern approved for this session)"
@@ -4318,6 +4444,16 @@ class GatewayRunner:
             for pk in pattern_keys:
                 approve_session(session_key, pk)
             scope_msg = ""
+
+        if response_queue is not None:
+            try:
+                response_queue.put_nowait(choice)
+            except Exception:
+                logger.debug("Could not signal async approval choice", exc_info=True)
+            task_hint = approval.get("async_task_id")
+            if task_hint:
+                return f"✅ Background task {task_hint} approved{scope_msg}. It has resumed."
+            return f"✅ Background task approved{scope_msg}. It has resumed."
 
         logger.info("User approved dangerous command via /approve: %s...%s", cmd[:60], scope_msg)
         from tools.terminal_tool import terminal_tool
@@ -4332,7 +4468,18 @@ class GatewayRunner:
         if session_key not in self._pending_approvals:
             return "No pending command to deny."
 
-        self._pending_approvals.pop(session_key)
+        approval = self._pending_approvals.pop(session_key)
+        response_queue = approval.get("response_queue")
+        if response_queue is not None:
+            try:
+                response_queue.put_nowait("deny")
+            except Exception:
+                logger.debug("Could not signal async denial choice", exc_info=True)
+            task_hint = approval.get("async_task_id")
+            logger.info("User denied async dangerous command via /deny")
+            if task_hint:
+                return f"❌ Background task {task_hint} denied."
+            return "❌ Background task denied."
         logger.info("User denied dangerous command via /deny")
         return "❌ Command denied."
 
@@ -5548,8 +5695,9 @@ class GatewayRunner:
                     first_response = result.get("final_response", "")
                     if first_response and not _already_streamed:
                         try:
-                            await adapter.send(source.chat_id, first_response,
-                                               metadata=getattr(event, "metadata", None))
+                            # Build metadata from source for thread support
+                            _metadata = {"thread_id": source.thread_id} if source.thread_id else None
+                            await adapter.send(source.chat_id, first_response, metadata=_metadata)
                         except Exception as e:
                             logger.warning("Failed to send first response before queued message: %s", e)
                 # else: interrupted — discard the interrupted response ("Operation

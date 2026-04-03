@@ -88,7 +88,7 @@ You need at least one way to connect to an LLM. Use `hermes model` to switch pro
 | **Kimi / Moonshot** | `KIMI_API_KEY` in `~/.hermes/.env` (provider: `kimi-coding`) |
 | **MiniMax** | `MINIMAX_API_KEY` in `~/.hermes/.env` (provider: `minimax`) |
 | **MiniMax China** | `MINIMAX_CN_API_KEY` in `~/.hermes/.env` (provider: `minimax-cn`) |
-| **Alibaba Cloud** | `DASHSCOPE_API_KEY` in `~/.hermes/.env` (provider: `alibaba`, aliases: `dashscope`, `qwen`) |
+| **Bailian / DashScope** | `DASHSCOPE_API_KEY` in `~/.hermes/.env` (provider: `bailian`, aliases: `dashscope`, `qwen`, `alibaba`) |
 | **Kilo Code** | `KILOCODE_API_KEY` in `~/.hermes/.env` (provider: `kilocode`) |
 | **OpenCode Zen** | `OPENCODE_ZEN_API_KEY` in `~/.hermes/.env` (provider: `opencode-zen`) |
 | **OpenCode Go** | `OPENCODE_GO_API_KEY` in `~/.hermes/.env` (provider: `opencode-go`) |
@@ -210,15 +210,15 @@ hermes chat --provider minimax --model MiniMax-M2.7
 hermes chat --provider minimax-cn --model MiniMax-M2.7
 # Requires: MINIMAX_CN_API_KEY in ~/.hermes/.env
 
-# Alibaba Cloud / DashScope (Qwen models)
-hermes chat --provider alibaba --model qwen-plus
+# Bailian / DashScope (Qwen models)
+hermes chat --provider bailian --model qwen-plus
 # Requires: DASHSCOPE_API_KEY in ~/.hermes/.env
 ```
 
 Or set the provider permanently in `config.yaml`:
 ```yaml
 model:
-  provider: "zai"       # or: kimi-coding, minimax, minimax-cn, alibaba
+  provider: "zai"       # or: kimi-coding, minimax, minimax-cn, bailian
   default: "glm-4-plus"
 ```
 

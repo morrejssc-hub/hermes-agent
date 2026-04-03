@@ -85,6 +85,7 @@ _PROVIDER_MODELS: dict[str, list[str]] = {
         "gemini-2.5-pro",
         "grok-code-fast-1",
     ],
+    "llama-api": [],
     "zai": [
         "glm-5",
         "glm-4.7",
@@ -126,7 +127,15 @@ _PROVIDER_MODELS: dict[str, list[str]] = {
         "deepseek-chat",
         "deepseek-reasoner",
     ],
-    "cpa": [],
+    "bailian": [
+        "qwen3.5-plus",
+        "qwen3-max",
+        "qwen3-coder-plus",
+        "qwen3-coder-next",
+        "qwen-plus-latest",
+        "qwen3.5-flash",
+        "qwen-vl-max",
+    ],
     "opencode-zen": [
         "gpt-5.4-pro",
         "gpt-5.4",
@@ -191,15 +200,6 @@ _PROVIDER_MODELS: dict[str, list[str]] = {
         "google/gemini-3-pro-preview",
         "google/gemini-3-flash-preview",
     ],
-    "alibaba": [
-        "qwen3.5-plus",
-        "qwen3-max",
-        "qwen3-coder-plus",
-        "qwen3-coder-next",
-        "qwen-plus-latest",
-        "qwen3.5-flash",
-        "qwen-vl-max",
-    ],
 }
 
 _PROVIDER_LABELS = {
@@ -208,18 +208,18 @@ _PROVIDER_LABELS = {
     "copilot-acp": "GitHub Copilot ACP",
     "nous": "Nous Portal",
     "copilot": "GitHub Copilot",
+    "llama-api": "Local llama-api",
     "zai": "Z.AI / GLM",
     "kimi-coding": "Kimi / Moonshot",
     "minimax": "MiniMax",
     "minimax-cn": "MiniMax (China)",
     "anthropic": "Anthropic",
     "deepseek": "DeepSeek",
-    "cpa": "CPA",
+    "bailian": "Bailian (DashScope)",
     "opencode-zen": "OpenCode Zen",
     "opencode-go": "OpenCode Go",
     "ai-gateway": "AI Gateway",
     "kilocode": "Kilo Code",
-    "alibaba": "Alibaba Cloud (DashScope)",
     "custom": "Custom endpoint",
 }
 
@@ -236,13 +236,22 @@ _PROVIDER_ALIASES = {
     "copilot-acp-agent": "copilot-acp",
     "kimi": "kimi-coding",
     "moonshot": "kimi-coding",
+    "llamaapi": "llama-api",
+    "llama_api": "llama-api",
     "minimax-china": "minimax-cn",
     "minimax_cn": "minimax-cn",
     "claude": "anthropic",
     "claude-code": "anthropic",
     "deep-seek": "deepseek",
-    "cli-proxy-api": "cpa",
-    "proxy-api": "cpa",
+    "dashscope": "bailian",
+    "aliyun": "bailian",
+    "qwen": "bailian",
+    "alibaba": "bailian",
+    "alibaba-cloud": "bailian",
+    "bailian-api": "bailian",
+    "cpa": "bailian",
+    "cli-proxy-api": "bailian",
+    "proxy-api": "bailian",
     "opencode": "opencode-zen",
     "zen": "opencode-zen",
     "go": "opencode-go",
@@ -253,10 +262,6 @@ _PROVIDER_ALIASES = {
     "kilo": "kilocode",
     "kilo-code": "kilocode",
     "kilo-gateway": "kilocode",
-    "dashscope": "alibaba",
-    "aliyun": "alibaba",
-    "qwen": "alibaba",
-    "alibaba-cloud": "alibaba",
 }
 
 
@@ -290,8 +295,7 @@ def list_available_providers() -> list[dict[str, str]]:
     # Canonical providers in display order
     _PROVIDER_ORDER = [
         "openrouter", "nous", "openai-codex", "copilot", "copilot-acp",
-        "zai", "kimi-coding", "minimax", "minimax-cn", "kilocode", "anthropic", "alibaba",
-        "cpa",
+        "llama-api", "zai", "kimi-coding", "minimax", "minimax-cn", "kilocode", "anthropic", "bailian",
         "opencode-zen", "opencode-go",
         "ai-gateway", "deepseek", "custom",
     ]
@@ -345,8 +349,10 @@ def parse_model_input(raw: str, current_provider: str) -> tuple[str, str]:
     provider from the input or *current_provider* if none was specified.
     """
     stripped = raw.strip()
-    if stripped.lower().startswith("cpa/") and len(stripped) > 4:
-        return ("cpa", stripped[4:].strip())
+    lowered = stripped.lower()
+    for prefix in ("bailian/", "alibaba/", "cpa/"):
+        if lowered.startswith(prefix) and len(stripped) > len(prefix):
+            return ("bailian", stripped[len(prefix):].strip())
     colon = stripped.find(":")
     if colon > 0:
         provider_part = stripped[:colon].strip().lower()
@@ -370,8 +376,11 @@ def normalize_provider_model_name(provider: Optional[str], model_name: Optional[
     """Normalize provider-specific model-name quirks."""
     provider_norm = normalize_provider(provider)
     model = str(model_name or "").strip()
-    if provider_norm == "cpa" and model.lower().startswith("cpa/"):
-        return model[4:].strip()
+    if provider_norm == "bailian":
+        lowered = model.lower()
+        for prefix in ("bailian/", "alibaba/", "cpa/"):
+            if lowered.startswith(prefix):
+                return model[len(prefix):].strip()
     return model
 
 
@@ -603,16 +612,6 @@ def provider_model_ids(provider: Optional[str]) -> list[str]:
         live = _fetch_ai_gateway_models()
         if live:
             return live
-    if normalized == "cpa":
-        try:
-            from hermes_cli.auth import resolve_api_key_provider_credentials
-
-            creds = resolve_api_key_provider_credentials("cpa")
-            live = fetch_api_models(creds.get("api_key") or None, creds.get("base_url"))
-            if live:
-                return live
-        except Exception:
-            pass
     if normalized == "custom":
         base_url = _get_custom_base_url()
         if base_url:
