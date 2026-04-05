@@ -348,6 +348,13 @@ class TestBackendSelection:
         with patch("tools.web_tools._load_web_config", return_value={"backend": "tavily"}):
             assert _get_backend() == "tavily"
 
+    def test_config_brave(self):
+        """web.backend=brave in config → 'brave' regardless of other keys."""
+        from tools.web_tools import _get_backend
+        with patch("tools.web_tools._load_web_config", return_value={"backend": "brave"}), \
+             patch.dict(os.environ, {"EXA_API_KEY": "exa-test"}):
+            assert _get_backend() == "brave"
+
     def test_config_tavily_overrides_env_keys(self):
         """web.backend=tavily in config → 'tavily' even if Firecrawl key set."""
         from tools.web_tools import _get_backend
@@ -366,6 +373,12 @@ class TestBackendSelection:
         from tools.web_tools import _get_backend
         with patch("tools.web_tools._load_web_config", return_value={"backend": "Tavily"}):
             assert _get_backend() == "tavily"
+
+    def test_config_brave_case_insensitive(self):
+        """web.backend=Brave (mixed case) → 'brave'."""
+        from tools.web_tools import _get_backend
+        with patch("tools.web_tools._load_web_config", return_value={"backend": "Brave"}):
+            assert _get_backend() == "brave"
 
     # ── Fallback (no web.backend in config) ───────────────────────────
 
@@ -396,6 +409,20 @@ class TestBackendSelection:
         with patch("tools.web_tools._load_web_config", return_value={}), \
              patch.dict(os.environ, {"TAVILY_API_KEY": "tvly-test"}):
             assert _get_backend() == "tavily"
+
+    def test_fallback_brave_only_key(self):
+        """Only BRAVE_SEARCH_API_KEY set → 'brave'."""
+        from tools.web_tools import _get_backend
+        with patch("tools.web_tools._load_web_config", return_value={}), \
+             patch.dict(os.environ, {"BRAVE_SEARCH_API_KEY": "brave-test"}):
+            assert _get_backend() == "brave"
+
+    def test_fallback_brave_alias_key(self):
+        """Only BRAVE_API_KEY set → 'brave'."""
+        from tools.web_tools import _get_backend
+        with patch("tools.web_tools._load_web_config", return_value={}), \
+             patch.dict(os.environ, {"BRAVE_API_KEY": "brave-test"}):
+            assert _get_backend() == "brave"
 
     def test_fallback_tavily_with_firecrawl_prefers_firecrawl(self):
         """Tavily + Firecrawl keys, no config → 'firecrawl' (backward compat)."""

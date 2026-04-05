@@ -227,6 +227,16 @@ _PROVIDER_MODELS: dict[str, list[str]] = {
         "google/gemini-3-pro-preview",
         "google/gemini-3-flash-preview",
     ],
+    "bailian": [
+        "qwen3.5-plus",
+        "qwen3-coder-plus",
+        "qwen3-coder-next",
+        # Third-party models available on coding-intl
+        "glm-5",
+        "glm-4.7",
+        "kimi-k2.5",
+        "MiniMax-M2.5",
+    ],
     # Alibaba DashScope Coding platform (coding-intl) — default endpoint.
     # Supports Qwen models + third-party providers (GLM, Kimi, MiniMax).
     # Users with classic DashScope keys should override DASHSCOPE_BASE_URL
@@ -267,6 +277,7 @@ _PROVIDER_LABELS = {
     "minimax-cn": "MiniMax (China)",
     "anthropic": "Anthropic",
     "deepseek": "DeepSeek",
+    "bailian": "Bailian (DashScope)",
     "opencode-zen": "OpenCode Zen",
     "opencode-go": "OpenCode Go",
     "ai-gateway": "AI Gateway",
@@ -304,10 +315,15 @@ _PROVIDER_ALIASES = {
     "kilo": "kilocode",
     "kilo-code": "kilocode",
     "kilo-gateway": "kilocode",
-    "dashscope": "alibaba",
-    "aliyun": "alibaba",
-    "qwen": "alibaba",
-    "alibaba-cloud": "alibaba",
+    "dashscope": "bailian",
+    "aliyun": "bailian",
+    "qwen": "bailian",
+    "alibaba": "bailian",
+    "alibaba-cloud": "bailian",
+    "bailian-api": "bailian",
+    "cpa": "bailian",
+    "cli-proxy-api": "bailian",
+    "proxy-api": "bailian",
     "hf": "huggingface",
     "hugging-face": "huggingface",
     "huggingface-hub": "huggingface",
@@ -344,7 +360,7 @@ def list_available_providers() -> list[dict[str, str]]:
     # Canonical providers in display order
     _PROVIDER_ORDER = [
         "openrouter", "nous", "openai-codex", "copilot", "copilot-acp",
-        "huggingface", "zai", "kimi-coding", "minimax", "minimax-cn", "kilocode", "anthropic", "alibaba",
+        "huggingface", "zai", "kimi-coding", "minimax", "minimax-cn", "kilocode", "anthropic", "bailian",
         "opencode-zen", "opencode-go",
         "ai-gateway", "deepseek", "custom",
     ]
@@ -398,6 +414,10 @@ def parse_model_input(raw: str, current_provider: str) -> tuple[str, str]:
     provider from the input or *current_provider* if none was specified.
     """
     stripped = raw.strip()
+    lowered = stripped.lower()
+    for prefix in ("bailian/", "alibaba/", "cpa/"):
+        if lowered.startswith(prefix) and len(stripped) > len(prefix):
+            return ("bailian", stripped[len(prefix):].strip())
     colon = stripped.find(":")
     if colon > 0:
         provider_part = stripped[:colon].strip().lower()
@@ -580,6 +600,18 @@ def normalize_provider(provider: Optional[str]) -> str:
     """
     normalized = (provider or "openrouter").strip().lower()
     return _PROVIDER_ALIASES.get(normalized, normalized)
+
+
+def normalize_provider_model_name(provider: Optional[str], model_name: Optional[str]) -> str:
+    """Normalize provider-specific model-name prefixes from user input."""
+    provider_norm = normalize_provider(provider)
+    model = str(model_name or "").strip()
+    if provider_norm == "bailian":
+        lowered = model.lower()
+        for prefix in ("bailian/", "alibaba/", "cpa/"):
+            if lowered.startswith(prefix):
+                return model[len(prefix):].strip()
+    return model
 
 
 def provider_label(provider: Optional[str]) -> str:
@@ -1177,7 +1209,7 @@ def validate_requested_model(
       - recognized: whether it matched a known provider catalog
       - message: optional warning / guidance for the user
     """
-    requested = (model_name or "").strip()
+    requested = normalize_provider_model_name(provider, model_name)
     normalized = normalize_provider(provider)
     if normalized == "openrouter" and base_url and "openrouter.ai" not in base_url:
         normalized = "custom"

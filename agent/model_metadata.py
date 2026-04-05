@@ -25,12 +25,13 @@ logger = logging.getLogger(__name__)
 _PROVIDER_PREFIXES: frozenset[str] = frozenset({
     "openrouter", "nous", "openai-codex", "copilot", "copilot-acp",
     "zai", "kimi-coding", "minimax", "minimax-cn", "anthropic", "deepseek",
-    "opencode-zen", "opencode-go", "ai-gateway", "kilocode", "alibaba",
+    "opencode-zen", "opencode-go", "ai-gateway", "kilocode", "bailian", "alibaba",
     "custom", "local",
     # Common aliases
     "glm", "z-ai", "z.ai", "zhipu", "github", "github-copilot",
     "github-models", "kimi", "moonshot", "claude", "deep-seek",
     "opencode", "zen", "go", "vercel", "kilo", "dashscope", "aliyun", "qwen",
+    "bailian", "cpa", "cli-proxy-api", "proxy-api",
 })
 
 
@@ -172,8 +173,8 @@ _URL_TO_PROVIDER: Dict[str, str] = {
     "api.moonshot.ai": "kimi-coding",
     "api.kimi.com": "kimi-coding",
     "api.minimax": "minimax",
-    "dashscope.aliyuncs.com": "alibaba",
-    "dashscope-intl.aliyuncs.com": "alibaba",
+    "dashscope.aliyuncs.com": "bailian",
+    "dashscope-intl.aliyuncs.com": "bailian",
     "openrouter.ai": "openrouter",
     "generativelanguage.googleapis.com": "google",
     "inference-api.nousresearch.com": "nous",

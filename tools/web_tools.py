@@ -14,6 +14,7 @@ Available tools:
 
 Backend compatibility:
 - Exa: https://exa.ai (search, extract)
+- Brave Search: https://brave.com/search/api/ (search only)
 - Firecrawl: https://docs.firecrawl.dev/introduction (search, extract, crawl; direct or derived firecrawl-gateway.<domain> for Nous Subscribers)
 - Parallel: https://docs.parallel.ai (search, extract)
 - Tavily: https://tavily.com (search, extract, crawl)
@@ -88,7 +89,7 @@ def _get_backend() -> str:
     keys manually without running setup.
     """
     configured = (_load_web_config().get("backend") or "").lower().strip()
-    if configured in ("parallel", "firecrawl", "tavily", "exa"):
+    if configured in ("parallel", "firecrawl", "tavily", "exa", "brave"):
         return configured
 
     # Fallback for manual / legacy config — pick the highest-priority
@@ -98,6 +99,7 @@ def _get_backend() -> str:
         ("firecrawl", _has_env("FIRECRAWL_API_KEY") or _has_env("FIRECRAWL_API_URL") or _is_tool_gateway_ready()),
         ("parallel", _has_env("PARALLEL_API_KEY")),
         ("tavily", _has_env("TAVILY_API_KEY")),
+        ("brave", _has_brave_api_key()),
         ("exa", _has_env("EXA_API_KEY")),
     )
     for backend, available in backend_candidates:
@@ -117,6 +119,8 @@ def _is_backend_available(backend: str) -> bool:
         return check_firecrawl_api_key()
     if backend == "tavily":
         return _has_env("TAVILY_API_KEY")
+    if backend == "brave":
+        return _has_brave_api_key()
     return False
 
 # ─── Firecrawl Client ────────────────────────────────────────────────────────
@@ -187,6 +191,8 @@ def _web_requires_env() -> list[str]:
         "EXA_API_KEY",
         "PARALLEL_API_KEY",
         "TAVILY_API_KEY",
+        "BRAVE_SEARCH_API_KEY",
+        "BRAVE_API_KEY",
         "FIRECRAWL_API_KEY",
         "FIRECRAWL_API_URL",
     ]
@@ -238,6 +244,85 @@ def _get_firecrawl_client():
     _firecrawl_client = Firecrawl(**kwargs)
     _firecrawl_client_config = client_config
     return _firecrawl_client
+
+# ─── Brave Search Client ─────────────────────────────────────────────────────
+
+_BRAVE_SEARCH_BASE_URL = "https://api.search.brave.com/res/v1/web/search"
+
+
+def _get_brave_api_key() -> str:
+    """Return the configured Brave Search API key.
+
+    ``BRAVE_SEARCH_API_KEY`` is the preferred Hermes-specific name.
+    ``BRAVE_API_KEY`` remains supported as an alias to match Brave's docs.
+    """
+    return (
+        os.getenv("BRAVE_SEARCH_API_KEY", "").strip()
+        or os.getenv("BRAVE_API_KEY", "").strip()
+    )
+
+
+def _has_brave_api_key() -> bool:
+    return bool(_get_brave_api_key())
+
+
+def _brave_request(query: str, limit: int) -> dict:
+    """Send a Brave Search API request.
+
+    Official docs:
+    - auth header: ``X-Subscription-Token``
+    - endpoint: ``GET /res/v1/web/search``
+    """
+    api_key = _get_brave_api_key()
+    if not api_key:
+        raise ValueError(
+            "BRAVE_SEARCH_API_KEY environment variable not set. "
+            "Get your API key at https://api-dashboard.search.brave.com/"
+        )
+
+    headers = {
+        "Accept": "application/json",
+        "Accept-Encoding": "gzip",
+        "X-Subscription-Token": api_key,
+    }
+    params = {
+        "q": query,
+        "count": max(1, min(limit, 20)),
+    }
+    logger.info("Brave search request to %s", _BRAVE_SEARCH_BASE_URL)
+    response = httpx.get(_BRAVE_SEARCH_BASE_URL, headers=headers, params=params, timeout=60)
+    response.raise_for_status()
+    return response.json()
+
+
+def _normalize_brave_search_results(response: dict) -> dict:
+    """Normalize Brave web search results to the standard Hermes format."""
+    web_results: List[Dict[str, Any]] = []
+    web_section = response.get("web") if isinstance(response, dict) else {}
+    results = web_section.get("results", []) if isinstance(web_section, dict) else []
+    for i, result in enumerate(results):
+        if not isinstance(result, dict):
+            continue
+        description = result.get("description", "")
+        if not description:
+            extra_snippets = result.get("extra_snippets")
+            if isinstance(extra_snippets, list):
+                description = " ".join(str(snippet).strip() for snippet in extra_snippets if str(snippet).strip())
+        web_results.append({
+            "title": result.get("title", ""),
+            "url": result.get("url", ""),
+            "description": description,
+            "position": i + 1,
+        })
+    return {"success": True, "data": {"web": web_results}}
+
+
+def _brave_backend_unsupported(tool_name: str) -> str:
+    return json.dumps({
+        "error": f"{tool_name} is not supported by the Brave Search backend. "
+                 "Configure Firecrawl, Tavily, Exa, or Parallel for page extraction.",
+        "success": False,
+    }, ensure_ascii=False)
 
 # ─── Parallel Client ─────────────────────────────────────────────────────────
 
@@ -1016,7 +1101,7 @@ def web_search_tool(query: str, limit: int = 5) -> str:
     Search the web for information using available search API backend.
 
     This function provides a generic interface for web search that can work
-    with multiple backends (Parallel or Firecrawl).
+    with multiple backends (Parallel, Brave, Exa, Tavily, or Firecrawl).
 
     Note: This function returns search result metadata only (URLs, titles, descriptions).
     Use web_extract_tool to get full content from specific URLs.
@@ -1090,6 +1175,17 @@ def web_search_tool(query: str, limit: int = 5) -> str:
                 "include_images": False,
             })
             response_data = _normalize_tavily_search_results(raw)
+            debug_call_data["results_count"] = len(response_data.get("data", {}).get("web", []))
+            result_json = json.dumps(response_data, indent=2, ensure_ascii=False)
+            debug_call_data["final_response_size"] = len(result_json)
+            _debug.log_call("web_search_tool", debug_call_data)
+            _debug.save()
+            return result_json
+
+        if backend == "brave":
+            logger.info("Brave search: '%s' (limit: %d)", query, limit)
+            raw = _brave_request(query, limit)
+            response_data = _normalize_brave_search_results(raw)
             debug_call_data["results_count"] = len(response_data.get("data", {}).get("web", []))
             result_json = json.dumps(response_data, indent=2, ensure_ascii=False)
             debug_call_data["final_response_size"] = len(result_json)
@@ -1229,6 +1325,8 @@ async def web_extract_tool(
                     "include_images": False,
                 })
                 results = _normalize_tavily_documents(raw, fallback_url=safe_urls[0] if safe_urls else "")
+            elif backend == "brave":
+                return _brave_backend_unsupported("web_extract")
             else:
                 # ── Firecrawl extraction ──
                 # Determine requested formats for Firecrawl v2
@@ -1590,6 +1688,9 @@ async def web_crawl_tool(
             _debug.save()
             return cleaned_result
 
+        if backend == "brave":
+            return _brave_backend_unsupported("web_crawl")
+
         # web_crawl requires Firecrawl or the Firecrawl tool-gateway — Parallel has no crawl API
         if not check_firecrawl_api_key():
             return json.dumps({
@@ -1885,9 +1986,9 @@ def check_firecrawl_api_key() -> bool:
 def check_web_api_key() -> bool:
     """Check whether the configured web backend is available."""
     configured = _load_web_config().get("backend", "").lower().strip()
-    if configured in ("exa", "parallel", "firecrawl", "tavily"):
+    if configured in ("exa", "parallel", "firecrawl", "tavily", "brave"):
         return _is_backend_available(configured)
-    return any(_is_backend_available(backend) for backend in ("exa", "parallel", "firecrawl", "tavily"))
+    return any(_is_backend_available(backend) for backend in ("exa", "parallel", "firecrawl", "tavily", "brave"))
 
 
 def check_auxiliary_model() -> bool:
@@ -1925,6 +2026,8 @@ if __name__ == "__main__":
             print("   Using Parallel API (https://parallel.ai)")
         elif backend == "tavily":
             print("   Using Tavily API (https://tavily.com)")
+        elif backend == "brave":
+            print("   Using Brave Search API (https://api-dashboard.search.brave.com/)")
         else:
             if firecrawl_url_available:
                 print(f"   Using self-hosted Firecrawl: {os.getenv('FIRECRAWL_API_URL').strip().rstrip('/')}")
@@ -1937,7 +2040,7 @@ if __name__ == "__main__":
     else:
         print("❌ No web search backend configured")
         print(
-            "Set EXA_API_KEY, PARALLEL_API_KEY, TAVILY_API_KEY, FIRECRAWL_API_KEY, FIRECRAWL_API_URL"
+            "Set EXA_API_KEY, PARALLEL_API_KEY, TAVILY_API_KEY, BRAVE_SEARCH_API_KEY, BRAVE_API_KEY, FIRECRAWL_API_KEY, FIRECRAWL_API_URL"
             f"{_firecrawl_backend_help_suffix()}"
         )
 

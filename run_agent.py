@@ -2556,10 +2556,10 @@ class AIAgent:
             timestamp_line += f"\nProvider: {self.provider}"
         prompt_parts.append(timestamp_line)
 
-        # Alibaba Coding Plan API always returns "glm-4.7" as model name regardless
+        # Bailian / Alibaba Coding Plan API always returns "glm-4.7" as model name regardless
         # of the requested model. Inject explicit model identity into the system prompt
         # so the agent can correctly report which model it is (workaround for API bug).
-        if self.provider == "alibaba":
+        if self.provider in {"alibaba", "bailian"}:
             _model_short = self.model.split("/")[-1] if "/" in self.model else self.model
             prompt_parts.append(
                 f"You are powered by the model named {_model_short}. "
@@ -4922,8 +4922,8 @@ class AIAgent:
         return transformed
 
     def _anthropic_preserve_dots(self) -> bool:
-        """True when using Alibaba/DashScope anthropic-compatible endpoint (model names keep dots, e.g. qwen3.5-plus)."""
-        if (getattr(self, "provider", "") or "").lower() == "alibaba":
+        """True when using Bailian / DashScope anthropic-compatible endpoints (model names keep dots, e.g. qwen3.5-plus)."""
+        if (getattr(self, "provider", "") or "").lower() in {"alibaba", "bailian"}:
             return True
         base = (getattr(self, "base_url", "") or "").lower()
         return "dashscope" in base or "aliyuncs" in base

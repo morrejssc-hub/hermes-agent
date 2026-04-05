@@ -530,7 +530,7 @@ DEFAULT_CONFIG = {
     },
 
     # Config schema version - bump this when adding new required fields
-    "_config_version": 11,
+    "_config_version": 12,
 }
 
 # =============================================================================
@@ -546,6 +546,7 @@ ENV_VARS_BY_VERSION: Dict[int, List[str]] = {
         "SLACK_BOT_TOKEN", "SLACK_APP_TOKEN", "SLACK_ALLOWED_USERS"],
     10: ["TAVILY_API_KEY"],
     11: ["TERMINAL_MODAL_MODE"],
+    12: ["BRAVE_SEARCH_API_KEY"],
 }
 
 # Required environment variables with metadata for migration prompts.
@@ -669,15 +670,15 @@ OPTIONAL_ENV_VARS = {
         "category": "provider",
     },
     "DASHSCOPE_API_KEY": {
-        "description": "Alibaba Cloud DashScope API key (Qwen + multi-provider models)",
-        "prompt": "DashScope API Key",
+        "description": "Bailian / DashScope API key (Qwen + multi-provider models)",
+        "prompt": "Bailian API Key",
         "url": "https://modelstudio.console.alibabacloud.com/",
         "password": True,
         "category": "provider",
     },
     "DASHSCOPE_BASE_URL": {
-        "description": "Custom DashScope base URL (default: coding-intl OpenAI-compat endpoint)",
-        "prompt": "DashScope Base URL",
+        "description": "Custom Bailian / DashScope base URL (default: coding-intl OpenAI-compat endpoint)",
+        "prompt": "Bailian Base URL",
         "url": "",
         "password": False,
         "category": "provider",
@@ -803,6 +804,23 @@ OPTIONAL_ENV_VARS = {
         "tools": ["web_search", "web_extract", "web_crawl"],
         "password": True,
         "category": "tool",
+    },
+    "BRAVE_SEARCH_API_KEY": {
+        "description": "Brave Search API key for privacy-first web search",
+        "prompt": "Brave Search API key",
+        "url": "https://api-dashboard.search.brave.com/",
+        "tools": ["web_search"],
+        "password": True,
+        "category": "tool",
+    },
+    "BRAVE_API_KEY": {
+        "description": "Brave Search API key alias (same as BRAVE_SEARCH_API_KEY)",
+        "prompt": "Brave API key",
+        "url": "https://api-dashboard.search.brave.com/",
+        "tools": ["web_search"],
+        "password": True,
+        "category": "tool",
+        "advanced": True,
     },
     "BROWSERBASE_API_KEY": {
         "description": "Browserbase API key for cloud browser (optional — local browser works without this)",

@@ -1,4 +1,4 @@
-"""Tests for API-key provider support (z.ai/GLM, Kimi, MiniMax, AI Gateway)."""
+"""Tests for API-key provider support (z.ai/GLM, Kimi, MiniMax, AI Gateway, Bailian)."""
 
 import os
 import sys
@@ -45,6 +45,7 @@ class TestProviderRegistry:
         ("minimax-cn", "MiniMax (China)", "api_key"),
         ("ai-gateway", "AI Gateway", "api_key"),
         ("kilocode", "Kilo Code", "api_key"),
+        ("bailian", "Bailian (DashScope)", "api_key"),
     ])
     def test_provider_registered(self, provider_id, name, auth_type):
         assert provider_id in PROVIDER_REGISTRY
@@ -93,6 +94,11 @@ class TestProviderRegistry:
         assert pconfig.api_key_env_vars == ("HF_TOKEN",)
         assert pconfig.base_url_env_var == "HF_BASE_URL"
 
+    def test_bailian_env_vars(self):
+        pconfig = PROVIDER_REGISTRY["bailian"]
+        assert pconfig.api_key_env_vars == ("DASHSCOPE_API_KEY",)
+        assert pconfig.base_url_env_var == "DASHSCOPE_BASE_URL"
+
     def test_base_urls(self):
         assert PROVIDER_REGISTRY["copilot"].inference_base_url == "https://api.githubcopilot.com"
         assert PROVIDER_REGISTRY["copilot-acp"].inference_base_url == "acp://copilot"
@@ -102,6 +108,7 @@ class TestProviderRegistry:
         assert PROVIDER_REGISTRY["minimax-cn"].inference_base_url == "https://api.minimaxi.com/anthropic"
         assert PROVIDER_REGISTRY["ai-gateway"].inference_base_url == "https://ai-gateway.vercel.sh/v1"
         assert PROVIDER_REGISTRY["kilocode"].inference_base_url == "https://api.kilo.ai/api/gateway"
+        assert PROVIDER_REGISTRY["bailian"].inference_base_url == "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
         assert PROVIDER_REGISTRY["huggingface"].inference_base_url == "https://router.huggingface.co/v1"
 
     def test_oauth_providers_unchanged(self):
@@ -123,7 +130,7 @@ PROVIDER_ENV_VARS = (
     "KIMI_API_KEY", "KIMI_BASE_URL", "MINIMAX_API_KEY", "MINIMAX_CN_API_KEY",
     "AI_GATEWAY_API_KEY", "AI_GATEWAY_BASE_URL",
     "KILOCODE_API_KEY", "KILOCODE_BASE_URL",
-    "DASHSCOPE_API_KEY", "OPENCODE_ZEN_API_KEY", "OPENCODE_GO_API_KEY",
+    "DASHSCOPE_API_KEY", "DASHSCOPE_BASE_URL", "OPENCODE_ZEN_API_KEY", "OPENCODE_GO_API_KEY",
     "NOUS_API_KEY", "GITHUB_TOKEN", "GH_TOKEN",
     "OPENAI_BASE_URL", "HERMES_COPILOT_ACP_COMMAND", "COPILOT_CLI_PATH",
     "HERMES_COPILOT_ACP_ARGS", "COPILOT_ACP_BASE_URL",
@@ -154,6 +161,9 @@ class TestResolveProvider:
 
     def test_explicit_ai_gateway(self):
         assert resolve_provider("ai-gateway") == "ai-gateway"
+
+    def test_explicit_bailian(self):
+        assert resolve_provider("bailian") == "bailian"
 
     def test_alias_glm(self):
         assert resolve_provider("glm") == "zai"
@@ -190,6 +200,11 @@ class TestResolveProvider:
 
     def test_alias_kilo_gateway(self):
         assert resolve_provider("kilo-gateway") == "kilocode"
+
+    def test_alias_legacy_bailian_names(self):
+        assert resolve_provider("alibaba") == "bailian"
+        assert resolve_provider("dashscope") == "bailian"
+        assert resolve_provider("cpa") == "bailian"
 
     def test_alias_case_insensitive(self):
         assert resolve_provider("GLM") == "zai"
@@ -253,6 +268,10 @@ class TestResolveProvider:
     def test_auto_detects_kilocode_key(self, monkeypatch):
         monkeypatch.setenv("KILOCODE_API_KEY", "test-kilo-key")
         assert resolve_provider("auto") == "kilocode"
+
+    def test_auto_detects_bailian_key(self, monkeypatch):
+        monkeypatch.setenv("DASHSCOPE_API_KEY", "test-dashscope-key")
+        assert resolve_provider("auto") == "bailian"
 
     def test_auto_detects_hf_token(self, monkeypatch):
         monkeypatch.setenv("HF_TOKEN", "hf_test_token")
@@ -339,6 +358,10 @@ class TestApiKeyProviderStatus:
 
     def test_non_api_key_provider(self):
         status = get_api_key_provider_status("nous")
+        assert status["configured"] is False
+
+    def test_bailian_no_key(self):
+        status = get_api_key_provider_status("bailian")
         assert status["configured"] is False
 
 
@@ -452,6 +475,14 @@ class TestResolveApiKeyProviderCredentials:
         creds = resolve_api_key_provider_credentials("kilocode")
         assert creds["base_url"] == "https://custom.kilo.example/v1"
 
+    def test_resolve_bailian_with_key(self, monkeypatch):
+        monkeypatch.setenv("DASHSCOPE_API_KEY", "dashscope-key")
+        monkeypatch.setenv("DASHSCOPE_BASE_URL", "https://coding-intl.dashscope.aliyuncs.com/apps/anthropic")
+        creds = resolve_api_key_provider_credentials("bailian")
+        assert creds["provider"] == "bailian"
+        assert creds["api_key"] == "dashscope-key"
+        assert creds["base_url"] == "https://coding-intl.dashscope.aliyuncs.com/apps/anthropic"
+
     def test_resolve_with_custom_base_url(self, monkeypatch):
         monkeypatch.setenv("GLM_API_KEY", "glm-key")
         monkeypatch.setenv("GLM_BASE_URL", "https://custom.glm.example/v4")
@@ -530,6 +561,13 @@ class TestRuntimeProviderResolution:
         assert result["api_mode"] == "chat_completions"
         assert result["api_key"] == "kilo-key"
         assert "kilo.ai" in result["base_url"]
+
+    def test_runtime_bailian_legacy_alias(self, monkeypatch):
+        monkeypatch.setenv("DASHSCOPE_API_KEY", "dashscope-key")
+        from hermes_cli.runtime_provider import resolve_runtime_provider
+        result = resolve_runtime_provider(requested="alibaba")
+        assert result["provider"] == "bailian"
+        assert result["base_url"] == "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
 
     def test_runtime_auto_detects_api_key_provider(self, monkeypatch):
         monkeypatch.setenv("KIMI_API_KEY", "auto-kimi-key")

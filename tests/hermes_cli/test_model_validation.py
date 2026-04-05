@@ -63,6 +63,21 @@ class TestParseModelInput:
         assert provider == "zai"
         assert model == "glm-5"
 
+    def test_bailian_provider_switch(self):
+        provider, model = parse_model_input("bailian:qwen3.5-plus", "openrouter")
+        assert provider == "bailian"
+        assert model == "qwen3.5-plus"
+
+    def test_legacy_cpa_provider_switch_maps_to_bailian(self):
+        provider, model = parse_model_input("cpa:qwen3.5-plus", "openrouter")
+        assert provider == "bailian"
+        assert model == "qwen3.5-plus"
+
+    def test_bailian_slash_prefix_is_normalized(self):
+        provider, model = parse_model_input("bailian/qwen3.5-plus", "openrouter")
+        assert provider == "bailian"
+        assert model == "qwen3.5-plus"
+
     def test_no_slash_no_colon_keeps_provider(self):
         provider, model = parse_model_input("gpt-5.4", "openrouter")
         assert provider == "openrouter"

@@ -156,6 +156,14 @@ PROVIDER_REGISTRY: Dict[str, ProviderConfig] = {
         inference_base_url="https://api.anthropic.com",
         api_key_env_vars=("ANTHROPIC_API_KEY", "ANTHROPIC_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN"),
     ),
+    "bailian": ProviderConfig(
+        id="bailian",
+        name="Bailian (DashScope)",
+        auth_type="api_key",
+        inference_base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+        api_key_env_vars=("DASHSCOPE_API_KEY",),
+        base_url_env_var="DASHSCOPE_BASE_URL",
+    ),
     "alibaba": ProviderConfig(
         id="alibaba",
         name="Alibaba Cloud (DashScope)",
@@ -743,6 +751,10 @@ def resolve_provider(
         "hf": "huggingface", "hugging-face": "huggingface", "huggingface-hub": "huggingface",
         "go": "opencode-go", "opencode-go-sub": "opencode-go",
         "kilo": "kilocode", "kilo-code": "kilocode", "kilo-gateway": "kilocode",
+        "dashscope": "bailian", "aliyun": "bailian", "qwen": "bailian",
+        "alibaba": "bailian", "alibaba-cloud": "bailian",
+        "bailian-api": "bailian", "cpa": "bailian",
+        "cli-proxy-api": "bailian", "proxy-api": "bailian",
         # Local server aliases — route through the generic custom provider
         "lmstudio": "custom", "lm-studio": "custom", "lm_studio": "custom",
         "ollama": "custom", "vllm": "custom", "llamacpp": "custom",

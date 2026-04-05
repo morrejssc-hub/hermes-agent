@@ -245,6 +245,14 @@ TOOL_CATEGORIES = {
                 ],
             },
             {
+                "name": "Brave Search",
+                "tag": "Privacy-first search only",
+                "web_backend": "brave",
+                "env_vars": [
+                    {"key": "BRAVE_SEARCH_API_KEY", "prompt": "Brave Search API key", "url": "https://api-dashboard.search.brave.com/"},
+                ],
+            },
+            {
                 "name": "Firecrawl Self-Hosted",
                 "tag": "Free - run your own instance",
                 "web_backend": "firecrawl",

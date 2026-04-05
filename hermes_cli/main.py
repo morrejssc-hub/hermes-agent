@@ -922,6 +922,7 @@ def select_provider_and_model(args=None):
         "opencode-go": "OpenCode Go",
         "ai-gateway": "AI Gateway",
         "kilocode": "Kilo Code",
+        "bailian": "Bailian (DashScope)",
         "alibaba": "Alibaba Cloud (DashScope)",
         "huggingface": "Hugging Face",
         "custom": "Custom endpoint",
@@ -949,6 +950,7 @@ def select_provider_and_model(args=None):
         ("opencode-zen", "OpenCode Zen (35+ curated models, pay-as-you-go)"),
         ("opencode-go", "OpenCode Go (open models, $10/month subscription)"),
         ("ai-gateway", "AI Gateway (Vercel — 200+ models, pay-per-use)"),
+        ("bailian", "Bailian / DashScope Coding (Qwen + multi-provider)"),
         ("alibaba", "Alibaba Cloud / DashScope Coding (Qwen + multi-provider)"),
         ("huggingface", "Hugging Face Inference Providers (20+ open models)"),
     ]
@@ -1023,7 +1025,7 @@ def select_provider_and_model(args=None):
         _model_flow_anthropic(config, current_model)
     elif selected_provider == "kimi-coding":
         _model_flow_kimi(config, current_model)
-    elif selected_provider in ("zai", "minimax", "minimax-cn", "kilocode", "opencode-zen", "opencode-go", "ai-gateway", "alibaba", "huggingface"):
+    elif selected_provider in ("zai", "minimax", "minimax-cn", "kilocode", "opencode-zen", "opencode-go", "ai-gateway", "bailian", "alibaba", "huggingface"):
         _model_flow_api_key_provider(config, selected_provider, current_model)
 
 
@@ -4038,7 +4040,7 @@ For more help on a command:
     )
     chat_parser.add_argument(
         "--provider",
-        choices=["auto", "openrouter", "nous", "openai-codex", "copilot-acp", "copilot", "anthropic", "huggingface", "zai", "kimi-coding", "minimax", "minimax-cn", "kilocode"],
+        choices=["auto", "openrouter", "nous", "openai-codex", "copilot-acp", "copilot", "anthropic", "huggingface", "zai", "kimi-coding", "minimax", "minimax-cn", "kilocode", "bailian", "alibaba"],
         default=None,
         help="Inference provider (default: auto)"
     )
